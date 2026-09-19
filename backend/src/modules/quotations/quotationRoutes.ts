@@ -1,9 +1,16 @@
 import { FastifyInstance } from 'fastify';
 import { db } from '../../db/connection.js';
+import { optionalAuthenticate } from '../../middleware/auth.js';
+import { checkIdempotency, recordIdempotency } from '../../middleware/idempotency.js';
 
 export async function quotationRoutes(fastify: FastifyInstance) {
-  // Generate 48-hour locked quotation
-  fastify.post('/quotations/generate', async (request, reply) => {
+  // Generate 48-hour locked quotation (with idempotency support)
+  fastify.post('/quotations/generate', { preHandler: [optionalAuthenticate] }, async (request, reply) => {
+    // 1. Check Idempotency Key
+    if (await checkIdempotency(request, reply)) {
+      return;
+    }
+
     const {
       customerName = 'Anil Kumar Reddy',
       customerPhone = '+91 98481 99882',
@@ -11,7 +18,18 @@ export async function quotationRoutes(fastify: FastifyInstance) {
       city = 'Vijayawada',
       pincode = '520008',
       items = [],
-    } = request.body as any;
+    } = (request.body as any) || {};
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return reply.status(400).send({
+        type: 'https://api.electrakart.com/errors/validation-error',
+        title: 'Empty Items',
+        status: 400,
+        detail: 'Cannot generate quotation with empty items array.',
+        instance: request.url,
+        requestId: request.id,
+      });
+    }
 
     const quoId = `quo-${Date.now()}`;
     const quotationNumber = `EK-QUO-2026-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -21,17 +39,18 @@ export async function quotationRoutes(fastify: FastifyInstance) {
 
     for (const it of items) {
       const skuRes = await db.query(
-        'SELECT name, brand_id, series_id, selling_price_inr, specification, unit_of_measure FROM skus WHERE sku_code = $1',
+        'SELECT id, name, brand_id, series_id, selling_price_inr, specification, unit_of_measure FROM skus WHERE sku_code = $1 OR id = $1',
         [it.sku]
       );
 
-      const rate = skuRes.rows[0]?.selling_price_inr || it.rate || 500;
+      const rate = parseFloat(skuRes.rows[0]?.selling_price_inr || it.rate || 500);
       const qty = it.quantity || 1;
       const totalAmount = rate * qty;
       const gstAmount = Math.round(totalAmount * 0.18);
 
       computedItems.push({
         id: `q-item-${computedItems.length + 1}`,
+        skuId: skuRes.rows[0]?.id || it.sku,
         sku: it.sku,
         name: skuRes.rows[0]?.name || it.name || it.sku,
         brand: it.brand || 'Polycab',
@@ -49,20 +68,26 @@ export async function quotationRoutes(fastify: FastifyInstance) {
     }
 
     const discount = subtotal > 20000 ? 1500 : 0;
-    const gstTotal = Math.round(subtotal * 0.18);
-    const deliveryFee = 0;
-    const grandTotal = subtotal + gstTotal - discount + deliveryFee;
+    const gstTotal = Math.round((subtotal - discount) * 0.18);
+    const deliveryFee = 0; // Free for locked quotation
+    const grandTotal = subtotal - discount + gstTotal + deliveryFee;
 
     const now = new Date();
     const expiry = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+    const customerId = request.user?.id || 'usr-customer-1';
 
-    await db.withTransaction(async (tx) => {
+    const quotation = await db.withTransaction(async (tx) => {
       await tx.query(
-        `INSERT INTO quotations (id, quotation_number, customer_name, customer_phone, delivery_address, city, pincode, subtotal_inr, discount_inr, delivery_fee_inr, gst_total_inr, grand_total_inr, is_price_locked, locked_until_timestamp, status, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, TRUE, $13, 'LOCKED', $14)`,
+        `INSERT INTO quotations (
+          id, quotation_number, customer_id, customer_name, customer_phone,
+          delivery_address, city, pincode, subtotal_inr, discount_inr,
+          delivery_fee_inr, gst_total_inr, grand_total_inr, is_price_locked,
+          locked_until_timestamp, status, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, TRUE, $14, 'LOCKED', NOW())`,
         [
           quoId,
           quotationNumber,
+          customerId,
           customerName,
           customerPhone,
           deliveryAddress,
@@ -74,68 +99,81 @@ export async function quotationRoutes(fastify: FastifyInstance) {
           gstTotal,
           grandTotal,
           expiry.toISOString(),
-          now.toISOString(),
         ]
       );
 
-      for (const item of computedItems) {
-        const sRes = await tx.query('SELECT id FROM skus WHERE sku_code = $1 OR id = $1', [item.sku]);
-        const skuId = sRes.rows[0]?.id || item.sku;
-
+      for (const cit of computedItems) {
         await tx.query(
-          `INSERT INTO quotation_items (id, quotation_id, sku_id, sku_code, product_name, brand_name, series_name, specification_details, quantity, unit, unit_rate_inr, gst_rate_percent, gst_amount_inr, line_total_inr)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+          `INSERT INTO quotation_items (
+            id, quotation_id, sku_id, sku_code, product_name,
+            brand_name, series_name, specification_details, quantity,
+            unit, unit_rate_inr, gst_rate_percent, gst_amount_inr, line_total_inr
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
           [
-            item.id,
+            cit.id,
             quoId,
-            skuId,
-            item.sku,
-            item.name,
-            item.brand,
-            item.series,
-            item.specification,
-            item.quantity,
-            item.unit,
-            item.rate,
-            item.gstPercent,
-            item.gstAmount,
-            item.totalAmount,
+            cit.skuId,
+            cit.sku,
+            cit.name,
+            cit.brand,
+            cit.series,
+            cit.specification,
+            cit.quantity,
+            cit.unit,
+            cit.rate,
+            cit.gstPercent,
+            cit.gstAmount,
+            cit.totalAmount,
           ]
         );
       }
+
+      return {
+        id: quoId,
+        quotationNumber,
+        createdAt: now.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }),
+        validUntil: expiry.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }),
+        customerName,
+        customerPhone,
+        deliveryAddress,
+        city,
+        pincode,
+        items: computedItems,
+        subtotal,
+        discount,
+        deliveryFee,
+        gstTotal,
+        grandTotal,
+        isPriceLocked: true,
+        status: 'LOCKED',
+      };
     });
 
-    const quotation = {
-      id: quoId,
-      quotationNumber,
-      createdAt: now.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }),
-      validUntil: expiry.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }),
-      customerName,
-      customerPhone,
-      deliveryAddress,
-      city,
-      pincode,
-      items: computedItems,
-      subtotal,
-      discount,
-      deliveryFee,
-      gstTotal,
-      grandTotal,
-      isPriceLocked: true,
-      status: 'LOCKED',
-    };
+    // Record idempotency key if provided
+    const idempotencyKey = request.headers['idempotency-key'] as string | undefined;
+    if (idempotencyKey) {
+      await recordIdempotency(idempotencyKey, request.user?.id, request.url, request.body, 201, quotation);
+    }
 
     return reply.status(201).send(quotation);
   });
 
-  // Get all quotations
-  fastify.get('/quotations', async (_request, reply) => {
-    const res = await db.query('SELECT * FROM quotations ORDER BY created_at DESC');
+  // Get all quotations (scoped to user if customer)
+  fastify.get('/quotations', { preHandler: [optionalAuthenticate] }, async (request, reply) => {
+    let sql = 'SELECT * FROM quotations ORDER BY created_at DESC';
+    const params: any[] = [];
+
+    if (request.user?.role === 'CUSTOMER') {
+      sql = 'SELECT * FROM quotations WHERE customer_id = $1 ORDER BY created_at DESC';
+      params.push(request.user.id);
+    }
+
+    const res = await db.query(sql, params);
     return reply.send(res.rows);
   });
 
-  // Get quotation by ID or Number
-  fastify.get('/quotations/:id', async (request, reply) => {
+  // Get quotation by ID or Number (with IDOR ownership protection)
+  fastify.get('/quotations/:id', { preHandler: [optionalAuthenticate] }, async (request, reply) => {
     const { id } = request.params as any;
 
     const qRes = await db.query(
@@ -154,6 +192,18 @@ export async function quotationRoutes(fastify: FastifyInstance) {
     }
 
     const quotation = qRes.rows[0];
+
+    // IDOR check
+    if (request.user?.role === 'CUSTOMER' && quotation.customer_id && quotation.customer_id !== request.user.id) {
+      return reply.status(403).send({
+        type: 'https://api.electrakart.com/errors/forbidden',
+        title: 'Forbidden',
+        status: 403,
+        detail: 'You do not have permission to view another customer’s quotation.',
+        instance: request.url,
+      });
+    }
+
     const itemsRes = await db.query(
       'SELECT id, sku_code AS "sku", product_name AS "name", brand_name AS "brand", series_name AS "series", specification_details AS "specification", quantity, unit, unit_rate_inr AS "rate", gst_rate_percent AS "gstPercent", gst_amount_inr AS "gstAmount", line_total_inr AS "totalAmount" FROM quotation_items WHERE quotation_id = $1',
       [quotation.id]
@@ -181,8 +231,29 @@ export async function quotationRoutes(fastify: FastifyInstance) {
   });
 
   // Accept quotation
-  fastify.post('/quotations/:id/accept', async (request, reply) => {
+  fastify.post('/quotations/:id/accept', { preHandler: [optionalAuthenticate] }, async (request, reply) => {
     const { id } = request.params as any;
+
+    const qRes = await db.query('SELECT customer_id FROM quotations WHERE id = $1 OR quotation_number = $1 LIMIT 1', [id]);
+    if (qRes.rows.length === 0) {
+      return reply.status(404).send({
+        type: 'https://api.electrakart.com/errors/not-found',
+        title: 'Quotation Not Found',
+        status: 404,
+        detail: `Quotation '${id}' was not found.`,
+        instance: request.url,
+      });
+    }
+
+    if (request.user?.role === 'CUSTOMER' && qRes.rows[0].customer_id && qRes.rows[0].customer_id !== request.user.id) {
+      return reply.status(403).send({
+        type: 'https://api.electrakart.com/errors/forbidden',
+        title: 'Forbidden',
+        status: 403,
+        detail: 'You do not have permission to accept another customer’s quotation.',
+        instance: request.url,
+      });
+    }
 
     await db.query(
       "UPDATE quotations SET status = 'ACCEPTED' WHERE id = $1 OR quotation_number = $1",

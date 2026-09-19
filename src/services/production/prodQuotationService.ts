@@ -7,6 +7,7 @@ import { IQuotationService } from '../quotationService';
 import { Quotation, EstimateExtractedItem } from '../../types';
 import { apiClient } from '../../api/client';
 import { PRODUCTS_DATA } from '../../data/mockData';
+import { handleFallbackOrThrow } from './fallbackPolicy';
 
 export class ProductionQuotationService implements IQuotationService {
   async getQuotations(): Promise<Quotation[]> {
@@ -31,16 +32,16 @@ export class ProductionQuotationService implements IQuotationService {
         status: q.status,
         items: q.items || [],
       }));
-    } catch {
-      return [];
+    } catch (err) {
+      return handleFallbackOrThrow('ProductionQuotationService', 'getQuotations', err, []);
     }
   }
 
   async getQuotationById(id: string): Promise<Quotation | undefined> {
     try {
       return await apiClient.get<Quotation>(`/quotations/${id}`);
-    } catch {
-      return undefined;
+    } catch (err) {
+      return handleFallbackOrThrow('ProductionQuotationService', 'getQuotationById', err, undefined);
     }
   }
 

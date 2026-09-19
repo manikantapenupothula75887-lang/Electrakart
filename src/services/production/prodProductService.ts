@@ -7,6 +7,7 @@ import { IProductService, ProductFilterParams } from '../productService';
 import { Product, ProductCategory, ProductBrand, MasterCatalogMappingItem } from '../../types';
 import { apiClient } from '../../api/client';
 import { PRODUCTS_DATA, CATEGORIES_DATA, BRANDS_DATA, INITIAL_MAPPING_QUEUE } from '../../data/mockData';
+import { handleFallbackOrThrow } from './fallbackPolicy';
 
 export class ProductionProductService implements IProductService {
   async getProducts(filters?: ProductFilterParams): Promise<Product[]> {
@@ -20,44 +21,44 @@ export class ProductionProductService implements IProductService {
       const products = await apiClient.get<Product[]>(`/products${qs}`);
       return products && products.length > 0 ? products : PRODUCTS_DATA;
     } catch (err) {
-      console.warn('[ProductionProductService] Using fallback products:', err);
-      let result = [...PRODUCTS_DATA];
-      if (filters?.category && filters.category !== 'ALL') {
-        result = result.filter(
-          (p) =>
-            p.category.toLowerCase().replace(/[^a-z0-9]/g, '-') === filters.category ||
-            p.category === filters.category
-        );
-      }
-      if (filters?.brand && filters.brand !== 'ALL') {
-        result = result.filter((p) => p.brand.toLowerCase() === filters.brand?.toLowerCase());
-      }
-      return result;
+      return handleFallbackOrThrow('ProductionProductService', 'getProducts', err, (() => {
+        let result = [...PRODUCTS_DATA];
+        if (filters?.category && filters.category !== 'ALL') {
+          result = result.filter(
+            (p) =>
+              p.category.toLowerCase().replace(/[^a-z0-9]/g, '-') === filters.category ||
+              p.category === filters.category
+          );
+        }
+        if (filters?.brand && filters.brand !== 'ALL') {
+          result = result.filter((p) => p.brand.toLowerCase() === filters.brand?.toLowerCase());
+        }
+        return result;
+      })());
     }
   }
 
   async getProductById(id: string): Promise<Product | undefined> {
     try {
       return await apiClient.get<Product>(`/catalog/products/${id}`);
-    } catch {
-      return PRODUCTS_DATA.find((p) => p.id === id || p.sku === id);
+    } catch (err) {
+      return handleFallbackOrThrow('ProductionProductService', 'getProductById', err, PRODUCTS_DATA.find((p) => p.id === id || p.sku === id));
     }
   }
 
   async getProductBySku(sku: string): Promise<Product | undefined> {
     try {
       return await apiClient.get<Product>(`/catalog/products/${sku}`);
-    } catch {
-      return PRODUCTS_DATA.find((p) => p.sku === sku);
+    } catch (err) {
+      return handleFallbackOrThrow('ProductionProductService', 'getProductBySku', err, PRODUCTS_DATA.find((p) => p.sku === sku));
     }
   }
 
   async createMasterProduct(productData: Omit<Product, 'id'>): Promise<Product> {
     try {
       return await apiClient.post<Product>('/products', productData);
-    } catch {
-      const created: Product = { ...productData, id: `prod-${Date.now()}` };
-      return created;
+    } catch (err) {
+      return handleFallbackOrThrow('ProductionProductService', 'createMasterProduct', err, { ...productData, id: `prod-${Date.now()}` });
     }
   }
 
@@ -79,8 +80,8 @@ export class ProductionProductService implements IProductService {
         status: (item.status === 'PENDING' ? 'NEEDS_ADMIN_REVIEW' : item.status) as MasterCatalogMappingItem['status'],
         submittedAt: item.created_at || item.submittedAt || new Date().toISOString(),
       }));
-    } catch {
-      return INITIAL_MAPPING_QUEUE;
+    } catch (err) {
+      return handleFallbackOrThrow('ProductionProductService', 'getMappingQueue', err, INITIAL_MAPPING_QUEUE);
     }
   }
 
@@ -88,7 +89,7 @@ export class ProductionProductService implements IProductService {
     try {
       await apiClient.post(`/admin/mapping-queue/${id}/resolve`, { status, approvedSkuId: approvedSku });
     } catch (err) {
-      console.warn('[ProductionProductService] resolveMapping fallback:', err);
+      handleFallbackOrThrow('ProductionProductService', 'resolveMapping', err, undefined);
     }
   }
 
@@ -99,14 +100,15 @@ export class ProductionProductService implements IProductService {
       );
       return res.items || [];
     } catch (err) {
-      console.warn('[ProductionProductService] Search fallback:', err);
-      const q = query.toLowerCase();
-      return PRODUCTS_DATA.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          p.sku.toLowerCase().includes(q) ||
-          p.brand.toLowerCase().includes(q)
-      );
+      return handleFallbackOrThrow('ProductionProductService', 'searchProducts', err, (() => {
+        const q = query.toLowerCase();
+        return PRODUCTS_DATA.filter(
+          (p) =>
+            p.name.toLowerCase().includes(q) ||
+            p.sku.toLowerCase().includes(q) ||
+            p.brand.toLowerCase().includes(q)
+        );
+      })());
     }
   }
 
@@ -114,8 +116,8 @@ export class ProductionProductService implements IProductService {
     try {
       const categories = await apiClient.get<ProductCategory[]>('/categories');
       return categories && categories.length > 0 ? categories : CATEGORIES_DATA;
-    } catch {
-      return CATEGORIES_DATA;
+    } catch (err) {
+      return handleFallbackOrThrow('ProductionProductService', 'getCategories', err, CATEGORIES_DATA);
     }
   }
 
@@ -123,8 +125,8 @@ export class ProductionProductService implements IProductService {
     try {
       const brands = await apiClient.get<ProductBrand[]>('/brands');
       return brands && brands.length > 0 ? brands : BRANDS_DATA;
-    } catch {
-      return BRANDS_DATA;
+    } catch (err) {
+      return handleFallbackOrThrow('ProductionProductService', 'getBrands', err, BRANDS_DATA);
     }
   }
 }

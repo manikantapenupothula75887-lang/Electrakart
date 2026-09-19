@@ -6,6 +6,7 @@
 import { IPricingService, CartPricingSummary } from '../pricingService';
 import { CartItem, QuotationItem } from '../../types';
 import { apiClient } from '../../api/client';
+import { handleFallbackOrThrow } from './fallbackPolicy';
 
 export class ProductionPricingService implements IPricingService {
   async calculateCartSummaryAsync(
@@ -31,8 +32,13 @@ export class ProductionPricingService implements IPricingService {
         deliveryFeeINR: res.deliveryFeeINR,
         grandTotalINR: res.grandTotalINR,
       };
-    } catch {
-      return this.calculateCartSummary(cart, customerTier);
+    } catch (err) {
+      return handleFallbackOrThrow(
+        'ProductionPricingService',
+        'calculateCartSummaryAsync',
+        err,
+        this.calculateCartSummary(cart, customerTier)
+      );
     }
   }
 

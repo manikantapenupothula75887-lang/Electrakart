@@ -1,0 +1,76 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: electrakart-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: electrakart_user
+      POSTGRES_PASSWORD: electrakart_secure_dev_pass
+      POSTGRES_DB: electrakart_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U electrakart_user -d electrakart_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - electrakart-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: electrakart-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 5000
+      HOST: 0.0.0.0
+      DATABASE_URL: postgresql://electrakart_user:electrakart_secure_dev_pass@postgres:5432/electrakart_db
+      JWT_SECRET: electrakart_development_jwt_secret_key_32bytes_minimum
+      CORS_ORIGIN: http://localhost:3000,http://localhost:5173,http://localhost:80
+      RATE_LIMIT_MAX: 1000
+      RATE_LIMIT_WINDOW_MS: 60000
+      LOG_LEVEL: info
+      AUTO_SEED: "true"
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - electrakart-network
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:5000/api/v1
+        VITE_ALLOW_DEMO_FALLBACK: "true"
+    container_name: electrakart-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - electrakart-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  electrakart-network:
+    driver: bridge

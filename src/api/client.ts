@@ -28,8 +28,8 @@ export class ApiError extends Error {
 class ApiClient {
   private baseURL: string;
 
-  constructor(baseURL = '/api/v1') {
-    this.baseURL = baseURL;
+  constructor(baseURL?: string) {
+    this.baseURL = baseURL || (import.meta.env?.VITE_API_BASE_URL as string) || '/api/v1';
   }
 
   private getToken(): string | null {
@@ -43,6 +43,11 @@ class ApiClient {
       }
     }
     return localStorage.getItem('electrakart_auth_token');
+  }
+
+  private handleUnauthorized(): void {
+    localStorage.removeItem('electrakart_auth_token');
+    localStorage.removeItem('electrakart_auth_session');
   }
 
   private async request<T>(
@@ -84,6 +89,10 @@ class ApiClient {
       const data = isJson ? await response.json() : await response.text();
 
       if (!response.ok) {
+        if (response.status === 401) {
+          this.handleUnauthorized();
+        }
+
         const errorDetails: ApiErrorDetails = isJson
           ? data
           : {

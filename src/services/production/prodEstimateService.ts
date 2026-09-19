@@ -7,6 +7,7 @@ import { IEstimateService } from '../estimateService';
 import { EstimateExtractedItem } from '../../types';
 import { apiClient } from '../../api/client';
 import { PRODUCTS_DATA } from '../../data/mockData';
+import { handleFallbackOrThrow } from './fallbackPolicy';
 
 export interface EstimateExtractionResponse {
   estimateId: string;
@@ -151,11 +152,11 @@ export class ProductionEstimateService implements IEstimateService {
         estimateId: estRes.id,
         extractedItems: items,
       };
-    } catch {
-      return {
+    } catch (err) {
+      return handleFallbackOrThrow('ProductionEstimateService', 'extractEstimate', err, {
         estimateId: `est-${Date.now()}`,
         extractedItems: [],
-      };
+      });
     }
   }
 
@@ -182,8 +183,8 @@ export class ProductionEstimateService implements IEstimateService {
         reason: `Resolved by customer: ${selectedMatch.sku}`,
         matchedProduct: prod,
       };
-    } catch {
-      return undefined;
+    } catch (err) {
+      return handleFallbackOrThrow('ProductionEstimateService', 'resolveDisambiguationItem', err, undefined);
     }
   }
 }

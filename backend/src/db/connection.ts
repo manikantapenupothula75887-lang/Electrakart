@@ -20,7 +20,8 @@ export interface DbClient {
 export interface IDatabase extends DbClient {
   exec(sql: string): Promise<void>;
   withTransaction<T>(callback: (client: DbClient) => Promise<T>): Promise<T>;
-  healthCheck(): Promise<{ isHealthy: boolean; engine: string; serverTime: string; error?: string }>;
+  healthCheck(): Promise<{ isHealthy: boolean; engine: string; serverTime: string; latencyMs: number; error?: string }>;
+  validateConnection(): Promise<void>;
   close(): Promise<void>;
   getEngineType(): 'PG_POOL' | 'PGLITE';
 }
@@ -35,13 +36,19 @@ class PostgresDatabase implements IDatabase {
     const isExternalPg =
       config.databaseUrl.startsWith('postgresql://') || config.databaseUrl.startsWith('postgres://');
 
+    if (config.isProduction && !isExternalPg) {
+      throw new Error(
+        '[Database Error] Production environment requires a valid PostgreSQL DATABASE_URL. PGlite is prohibited in production.'
+      );
+    }
+
     if (isExternalPg) {
       this.engineType = 'PG_POOL';
       this.pool = new pg.Pool({
         connectionString: config.databaseUrl,
-        max: 20,
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 5000,
+        max: config.dbPoolMax,
+        idleTimeoutMillis: config.dbIdleTimeoutMs,
+        connectionTimeoutMillis: config.dbConnectionTimeoutMs,
       });
 
       this.pool.on('error', (err) => {
@@ -73,6 +80,23 @@ class PostgresDatabase implements IDatabase {
         })();
       }
       await this.isInitializing;
+    }
+  }
+
+  async validateConnection(): Promise<void> {
+    await this.ensureInitialized();
+    if (this.engineType === 'PG_POOL' && this.pool) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('SELECT 1');
+      } finally {
+        client.release();
+      }
+    } else if (this.engineType === 'PGLITE') {
+      if (config.isProduction) {
+        throw new Error('[Database Error] PGlite cannot be used in production.');
+      }
+      await this.pglite!.query('SELECT 1');
     }
   }
 
@@ -150,9 +174,11 @@ class PostgresDatabase implements IDatabase {
     throw new Error('Database not initialized');
   }
 
-  async healthCheck(): Promise<{ isHealthy: boolean; engine: string; serverTime: string; error?: string }> {
+  async healthCheck(): Promise<{ isHealthy: boolean; engine: string; serverTime: string; latencyMs: number; error?: string }> {
+    const start = Date.now();
     try {
       const res = await this.query('SELECT NOW() AS server_time');
+      const latencyMs = Date.now() - start;
       const serverTime = res.rows[0]?.server_time
         ? new Date(res.rows[0].server_time).toISOString()
         : new Date().toISOString();
@@ -161,12 +187,14 @@ class PostgresDatabase implements IDatabase {
         isHealthy: true,
         engine: this.engineType === 'PG_POOL' ? 'PostgreSQL Native/Remote (pg.Pool)' : 'PostgreSQL 16 Embedded (PGlite)',
         serverTime,
+        latencyMs,
       };
     } catch (err: any) {
       return {
         isHealthy: false,
         engine: this.engineType,
         serverTime: new Date().toISOString(),
+        latencyMs: Date.now() - start,
         error: err.message,
       };
     }
@@ -174,12 +202,25 @@ class PostgresDatabase implements IDatabase {
 
   async close(): Promise<void> {
     if (this.pool) {
-      await this.pool.end();
+      const p = this.pool;
       this.pool = null;
+      try {
+        await Promise.race([
+          p.end(),
+          new Promise((resolve) => setTimeout(resolve, 5000)),
+        ]);
+      } catch (err) {
+        console.warn('[Database] Error closing pool:', err);
+      }
     }
     if (this.pglite) {
-      await this.pglite.close();
+      const pg = this.pglite;
       this.pglite = null;
+      try {
+        await pg.close();
+      } catch (err) {
+        console.warn('[Database] Error closing PGlite:', err);
+      }
     }
   }
 }

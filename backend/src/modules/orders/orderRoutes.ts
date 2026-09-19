@@ -1,10 +1,16 @@
 import { FastifyInstance } from 'fastify';
 import { db } from '../../db/connection.js';
 import { optionalAuthenticate, authenticate } from '../../middleware/auth.js';
+import { checkIdempotency, recordIdempotency } from '../../middleware/idempotency.js';
 
 export async function orderRoutes(fastify: FastifyInstance) {
   // Create unified order with multi-store split fulfillment
   fastify.post('/orders', { preHandler: [optionalAuthenticate] }, async (request, reply) => {
+    // 1. Check Idempotency Key
+    if (await checkIdempotency(request, reply)) {
+      return;
+    }
+
     const {
       customerName = 'Anil Kumar Reddy',
       customerPhone = '+91 98481 99882',
@@ -14,7 +20,44 @@ export async function orderRoutes(fastify: FastifyInstance) {
       deliveryMethod = 'EXPRESS',
       paymentMethod = 'UPI',
       cart = [],
-    } = request.body as any;
+    } = (request.body as any) || {};
+
+    // 2. Validate input parameters
+    if (!customerName || typeof customerName !== 'string' || customerName.trim().length === 0) {
+      return reply.status(400).send({
+        type: 'https://api.electrakart.com/errors/validation-error',
+        title: 'Invalid Request',
+        status: 400,
+        detail: 'customerName is required.',
+        instance: request.url,
+        requestId: request.id,
+        invalidParams: [{ name: 'customerName', reason: 'Missing customerName' }],
+      });
+    }
+
+    if (!customerPhone || typeof customerPhone !== 'string' || customerPhone.replace(/\D/g, '').length < 10) {
+      return reply.status(400).send({
+        type: 'https://api.electrakart.com/errors/validation-error',
+        title: 'Invalid Request',
+        status: 400,
+        detail: 'A valid 10-digit customerPhone is required.',
+        instance: request.url,
+        requestId: request.id,
+        invalidParams: [{ name: 'customerPhone', reason: 'Phone must have at least 10 digits' }],
+      });
+    }
+
+    if (!pincode || !/^\d{6}$/.test(pincode.trim())) {
+      return reply.status(400).send({
+        type: 'https://api.electrakart.com/errors/validation-error',
+        title: 'Invalid Request',
+        status: 400,
+        detail: 'A valid 6-digit Indian postal pincode is required.',
+        instance: request.url,
+        requestId: request.id,
+        invalidParams: [{ name: 'pincode', reason: 'Must be 6 digits' }],
+      });
+    }
 
     if (!Array.isArray(cart) || cart.length === 0) {
       return reply.status(400).send({
@@ -23,6 +66,7 @@ export async function orderRoutes(fastify: FastifyInstance) {
         status: 400,
         detail: 'Cannot create an order with an empty cart.',
         instance: request.url,
+        requestId: request.id,
       });
     }
 
@@ -37,9 +81,13 @@ export async function orderRoutes(fastify: FastifyInstance) {
         const partnerGroups = new Map<string, any[]>();
 
         for (const item of cart) {
-          const skuCode = item.product.sku;
+          const skuCode = item.product?.sku || item.sku;
           const qty = item.quantity || 1;
           const partnerId = item.selectedStore?.partnerId || 'partner-vja-elec-1';
+
+          if (!skuCode || qty <= 0) {
+            throw new Error(`Invalid item in cart: SKU '${skuCode}', quantity ${qty}`);
+          }
 
           // Step 1: Validate & Lock inventory row in PostgreSQL
           const invRes = await tx.query(
@@ -76,40 +124,44 @@ export async function orderRoutes(fastify: FastifyInstance) {
             `INSERT INTO inventory_transactions (id, inventory_id, partner_id, sku_code, transaction_type, quantity_change, previous_quantity, new_quantity, reference_id, notes)
              VALUES ($1, $2, $3, $4, 'RESERVATION_ORDER', $5, $6, $7, $8, $9)`,
             [
-              `tx-res-${Date.now()}-${skuCode}`,
+              `tx-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
               inv.id,
               partnerId,
               skuCode,
-              qty,
-              inv.in_stock_quantity,
-              inv.in_stock_quantity,
-              orderNumber,
-              `Order reservation for ${customerName}`,
+              -qty,
+              inv.available_quantity,
+              newAvailable,
+              orderId,
+              `Reserved for order ${orderNumber}`,
             ]
           );
 
-          const price = inv.selling_price_inr || item.product.sellingPrice;
-          subtotal += price * qty;
-
+          // Group by partner for split fulfillments
           if (!partnerGroups.has(partnerId)) {
             partnerGroups.set(partnerId, []);
           }
           partnerGroups.get(partnerId)!.push({
             ...item,
-            validatedPrice: price,
+            resolvedSellingPrice: parseFloat(inv.selling_price_inr),
           });
+
+          subtotal += parseFloat(inv.selling_price_inr) * qty;
         }
 
         const discount = subtotal > 10000 ? 500 : 0;
-        const gstTotal = Math.round(subtotal * 0.18);
         const deliveryFee = subtotal > 5000 ? 0 : 150;
-        const grandTotal = subtotal + gstTotal - discount + deliveryFee;
+        const gstTotal = Math.round((subtotal - discount) * 0.18);
+        const grandTotal = subtotal - discount + gstTotal + deliveryFee;
 
-        // Step 4: Create Master Order
+        // Step 3: Insert Master Order
         const customerId = request.user?.id || 'usr-customer-1';
         await tx.query(
-          `INSERT INTO orders (id, order_number, customer_id, customer_name, customer_phone, delivery_address, city, pincode, delivery_method, subtotal_inr, discount_inr, delivery_fee_inr, gst_total_inr, grand_total_inr, payment_method, payment_status, overall_status, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'PAID', 'CONFIRMED', NOW(), NOW())`,
+          `INSERT INTO orders (
+            id, order_number, customer_id, customer_name, customer_phone,
+            delivery_address, city, pincode, delivery_method, payment_method,
+            payment_status, overall_status, subtotal_inr, discount_inr,
+            delivery_fee_inr, gst_total_inr, grand_total_inr, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'PAID', 'CONFIRMED', $11, $12, $13, $14, $15, NOW(), NOW())`,
           [
             orderId,
             orderNumber,
@@ -120,37 +172,38 @@ export async function orderRoutes(fastify: FastifyInstance) {
             city,
             pincode,
             deliveryMethod,
+            paymentMethod,
             subtotal,
             discount,
             deliveryFee,
             gstTotal,
             grandTotal,
-            paymentMethod,
           ]
         );
 
-        // Step 5: Create split fulfillment records
+        // Step 4: Create Split Fulfillments for each partner node
         const fulfillments: any[] = [];
         let fulIndex = 1;
 
-        for (const [pId, groupItems] of partnerGroups.entries()) {
-          const pRes = await tx.query(
-            'SELECT business_name, type, address FROM partners WHERE id = $1',
-            [pId]
-          );
-          const partner = pRes.rows[0] || {
-            business_name: groupItems[0].selectedStore?.storeName || 'Partner Store',
-            type: groupItems[0].selectedStore?.partnerType || 'RETAILER',
-            address: groupItems[0].selectedStore?.address || 'Vijayawada',
-          };
-
+        for (const [pId, pItems] of partnerGroups.entries()) {
           const fulId = `ful-${orderId}-${fulIndex}`;
-          const otp = `${Math.floor(1000 + Math.random() * 9000)}`;
+
+          // Lookup partner details
+          const pRes = await tx.query('SELECT business_name, type FROM partners WHERE id = $1', [pId]);
+          const partner = pRes.rows[0] || { business_name: 'Vijayawada Electricals', type: 'RETAILER' };
+          const addrRes = await tx.query('SELECT address, city FROM partners WHERE id = $1 LIMIT 1', [pId]);
+          const partnerAddr = addrRes.rows[0] ? `${addrRes.rows[0].address}, ${addrRes.rows[0].city}` : 'Besant Road, Governorpet, Vijayawada';
+
           const eta = fulIndex === 1 ? '30–45 mins' : '45–60 mins';
+          const otp = `${Math.floor(1000 + Math.random() * 9000)}`;
 
           await tx.query(
-            `INSERT INTO order_fulfillments (id, order_id, fulfillment_index, partner_id, partner_name, partner_type, partner_address, status, estimated_delivery_time, handover_otp, last_updated, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, 'CONFIRMED', $8, $9, NOW(), NOW())`,
+            `INSERT INTO order_fulfillments (
+              id, order_id, fulfillment_index, partner_id, partner_name,
+              partner_type, partner_address, status, estimated_delivery_time,
+              assigned_driver_name, assigned_driver_phone, handover_otp,
+              last_updated, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'CONFIRMED', $8, $9, $10, $11, NOW(), NOW())`,
             [
               fulId,
               orderId,
@@ -158,45 +211,45 @@ export async function orderRoutes(fastify: FastifyInstance) {
               pId,
               partner.business_name,
               partner.type,
-              partner.address,
+              partnerAddr,
               eta,
+              fulIndex === 1 ? 'K. Somesh (ElectraKart Pilot)' : 'Regional Logistics Van (AP16-TE-8102)',
+              '+91 99482 10928',
               otp,
             ]
           );
 
-          // Fulfillment items
+          // Insert fulfillment items
           const savedItems: any[] = [];
-          for (const it of groupItems) {
-            const fitId = `fit-${Date.now()}-${Math.random()}`;
-            const sRes = await tx.query('SELECT id FROM skus WHERE sku_code = $1 OR id = $1', [it.product.sku]);
-            const skuId = sRes.rows[0]?.id || it.product.id || it.product.sku;
+          for (const it of pItems) {
+            const fitId = `fit-${fulId}-${savedItems.length + 1}`;
+            const skuCode = it.product?.sku || it.sku;
+            const name = it.product?.name || skuCode;
+            const brand = it.product?.brand || 'Polycab';
+            const series = it.product?.series || 'Standard';
+            const unit = it.product?.unit || 'Nos';
+            const qty = it.quantity || 1;
+            const unitPrice = it.resolvedSellingPrice;
+            const lineTotal = Math.round(unitPrice * qty * 100) / 100;
+
+            // Resolve sku_id foreign key from skus table
+            const skuLookup = await tx.query('SELECT id FROM skus WHERE sku_code = $1 OR id = $1', [skuCode]);
+            const skuId = skuLookup.rows[0]?.id || skuCode;
 
             await tx.query(
-              `INSERT INTO fulfillment_items (id, fulfillment_id, sku_id, sku_code, product_name, brand, series, quantity, unit, unit_price_inr, line_total_inr)
+              `INSERT INTO fulfillment_items (id, fulfillment_id, sku_id, sku_code, product_name, brand, series, quantity, unit_price_inr, line_total_inr, unit)
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-              [
-                fitId,
-                fulId,
-                skuId,
-                it.product.sku,
-                it.product.name,
-                it.product.brand,
-                it.product.series,
-                it.quantity,
-                it.product.unit,
-                it.validatedPrice,
-                it.validatedPrice * it.quantity,
-              ]
+              [fitId, fulId, skuId, skuCode, name, brand, series, qty, unitPrice, lineTotal, unit]
             );
 
             savedItems.push({
-              sku: it.product.sku,
-              name: it.product.name,
-              brand: it.product.brand,
-              series: it.product.series,
-              quantity: it.quantity,
-              unitPrice: it.validatedPrice,
-              unit: it.product.unit,
+              sku: skuCode,
+              name,
+              brand,
+              series,
+              quantity: qty,
+              unitPrice,
+              unit,
             });
           }
 
@@ -222,10 +275,10 @@ export async function orderRoutes(fastify: FastifyInstance) {
             partnerId: pId,
             partnerName: partner.business_name,
             partnerType: partner.type,
-            partnerAddress: partner.address,
+            partnerAddress: partnerAddr,
             status: 'CONFIRMED',
             eta,
-            driverName: fulIndex === 1 ? 'K. Somesh (Dunzo/ElectraKart Express)' : 'Regional Logistics Van (AP16-TE-8102)',
+            driverName: fulIndex === 1 ? 'K. Somesh (ElectraKart Pilot)' : 'Regional Logistics Van (AP16-TE-8102)',
             driverPhone: '+91 99482 10928',
             handoverOtp: otp,
             lastUpdated: 'Just now',
@@ -260,6 +313,12 @@ export async function orderRoutes(fastify: FastifyInstance) {
           overallStatus: 'CONFIRMED',
         };
       });
+
+      // Record Idempotency Key if header present
+      const idempotencyKey = request.headers['idempotency-key'] as string | undefined;
+      if (idempotencyKey) {
+        await recordIdempotency(idempotencyKey, request.user?.id, request.url, request.body, 201, createdOrder);
+      }
 
       return reply.status(201).send(createdOrder);
     } catch (err: any) {
@@ -367,8 +426,8 @@ export async function orderRoutes(fastify: FastifyInstance) {
     return reply.send(orders);
   });
 
-  // Get single order by ID or Number
-  fastify.get('/orders/:id', async (request, reply) => {
+  // Get single order by ID or Number (with IDOR ownership protection)
+  fastify.get('/orders/:id', { preHandler: [optionalAuthenticate] }, async (request, reply) => {
     const { id } = request.params as any;
 
     const oRes = await db.query(
@@ -422,6 +481,33 @@ export async function orderRoutes(fastify: FastifyInstance) {
       })
     );
 
+    // IDOR Ownership verification
+    if (request.user) {
+      const user = request.user;
+      if (user.role === 'CUSTOMER') {
+        if (o.customer_id && o.customer_id !== user.id) {
+          return reply.status(403).send({
+            type: 'https://api.electrakart.com/errors/forbidden',
+            title: 'Forbidden',
+            status: 403,
+            detail: 'You do not have permission to view another customer’s order.',
+            instance: request.url,
+          });
+        }
+      } else if (user.role === 'RETAILER' || user.role === 'DISTRIBUTOR') {
+        const hasFulfillment = fulfillments.some((f) => f.partnerId === user.partnerId);
+        if (!hasFulfillment) {
+          return reply.status(403).send({
+            type: 'https://api.electrakart.com/errors/forbidden',
+            title: 'Forbidden',
+            status: 403,
+            detail: 'You do not have permission to view an order not allocated to your store/depot.',
+            instance: request.url,
+          });
+        }
+      }
+    }
+
     return reply.send({
       id: o.id,
       orderNumber: o.order_number,
@@ -444,10 +530,65 @@ export async function orderRoutes(fastify: FastifyInstance) {
     });
   });
 
-  // Update fulfillment lifecycle status (Partner / Driver action)
-  fastify.post('/orders/:orderId/fulfillments/:fulfillmentId/status', async (request, reply) => {
+  // Update fulfillment lifecycle status (Partner action with ownership checks)
+  fastify.post('/orders/:orderId/fulfillments/:fulfillmentId/status', { preHandler: [optionalAuthenticate] }, async (request, reply) => {
     const { orderId, fulfillmentId } = request.params as any;
-    const { status, note, driverName, driverPhone } = request.body as any;
+    const { status, note, driverName, driverPhone } = (request.body as any) || {};
+
+    const allowedStatuses = ['CONFIRMED', 'PREPARING', 'PACKED', 'DISPATCHED', 'DELIVERED', 'CANCELLED'];
+    if (!status || !allowedStatuses.includes(status)) {
+      return reply.status(400).send({
+        type: 'https://api.electrakart.com/errors/invalid-status',
+        title: 'Invalid Status',
+        status: 400,
+        detail: `Status must be one of: ${allowedStatuses.join(', ')}`,
+        instance: request.url,
+      });
+    }
+
+    // Check fulfillment existence
+    const fRes = await db.query(
+      'SELECT partner_id FROM order_fulfillments WHERE id = $1 AND order_id = $2',
+      [fulfillmentId, orderId]
+    );
+
+    if (fRes.rows.length === 0) {
+      return reply.status(404).send({
+        type: 'https://api.electrakart.com/errors/not-found',
+        title: 'Fulfillment Not Found',
+        status: 404,
+        detail: `Fulfillment '${fulfillmentId}' for order '${orderId}' was not found.`,
+        instance: request.url,
+      });
+    }
+
+    const ful = fRes.rows[0];
+    const user = request.user;
+
+    // If authenticated user is present, enforce role boundaries
+    if (user) {
+      // Customers cannot update fulfillment status
+      if (user.role === 'CUSTOMER') {
+        return reply.status(403).send({
+          type: 'https://api.electrakart.com/errors/forbidden',
+          title: 'Forbidden',
+          status: 403,
+          detail: 'Customers are not authorized to update fulfillment logistics.',
+          instance: request.url,
+        });
+      }
+
+      // Retailer / Distributor can only update their own partner fulfillment
+      if ((user.role === 'RETAILER' || user.role === 'DISTRIBUTOR') && ful.partner_id !== user.partnerId) {
+        return reply.status(403).send({
+          type: 'https://api.electrakart.com/errors/forbidden',
+          title: 'Forbidden',
+          status: 403,
+          detail: 'You are not authorized to update a fulfillment assigned to another partner node.',
+          instance: request.url,
+        });
+      }
+    }
 
     await db.withTransaction(async (tx) => {
       await tx.query(
@@ -476,8 +617,7 @@ export async function orderRoutes(fastify: FastifyInstance) {
           'SELECT sku_code, quantity FROM fulfillment_items WHERE fulfillment_id = $1',
           [fulfillmentId]
         );
-        const fRes = await tx.query('SELECT partner_id FROM order_fulfillments WHERE id = $1', [fulfillmentId]);
-        const partnerId = fRes.rows[0]?.partner_id;
+        const partnerId = ful.partner_id;
 
         for (const item of items.rows) {
           await tx.query(

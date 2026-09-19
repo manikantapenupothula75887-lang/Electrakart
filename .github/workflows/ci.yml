@@ -1,0 +1,116 @@
+name: ElectraKart CI/CD Pipeline
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  validate-and-build:
+    name: Validate TypeScript & Builds
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Frontend Dependencies
+        run: npm ci
+
+      - name: Typecheck & Build Frontend SPA
+        run: npm run build
+        env:
+          VITE_API_BASE_URL: https://api.electrakart.in/api/v1
+          VITE_ALLOW_DEMO_FALLBACK: "false"
+
+      - name: Install Backend Dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Compile Backend TypeScript
+        working-directory: ./backend
+        run: npm run build
+
+  backend-tests:
+    name: Database Migrations & Backend Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: electrakart_ci
+          POSTGRES_PASSWORD: electrakart_ci_secure_password
+          POSTGRES_DB: electrakart_ci_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Backend Dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Run Database Migrations
+        working-directory: ./backend
+        run: npm run migrate
+        env:
+          DATABASE_URL: postgresql://electrakart_ci:electrakart_ci_secure_password@localhost:5432/electrakart_ci_test
+          NODE_ENV: test
+
+      - name: Run Backend Test Suite
+        working-directory: ./backend
+        run: npm test
+        env:
+          DATABASE_URL: postgresql://electrakart_ci:electrakart_ci_secure_password@localhost:5432/electrakart_ci_test
+          JWT_SECRET: electrakart_ci_production_grade_jwt_secret_must_be_32_bytes_long
+          NODE_ENV: test
+
+  security-audit:
+    name: Security & Secret Leak Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Verify No Sensitive .env Files in Git
+        run: |
+          if git ls-files | grep -E "(^|/)\.env($|\.(production|local|secret))"; then
+            echo "ERROR: Sensitive .env files detected in git repository tracking!"
+            exit 1
+          else
+            echo "PASS: No sensitive .env files committed."
+          fi
+
+      - name: Verify Insecure Defaults are Rejected
+        working-directory: ./backend
+        run: |
+          npm ci
+          # Confirm production validation throws error on insecure JWT secret
+          NODE_ENV=production DATABASE_URL="postgresql://user:pass@localhost:5432/db" JWT_SECRET="short" npx tsx -e '
+            import { loadConfig } from "./src/config/environment.js";
+            try {
+              loadConfig();
+              console.error("FAIL: Startup should have failed on short JWT_SECRET");
+              process.exit(1);
+            } catch (err) {
+              console.log("PASS: Insecure secret rejected as expected:", err.message);
+            }
+          '
