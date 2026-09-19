@@ -5,13 +5,14 @@ import { useStore } from '../../context/StoreContext';
 import { UserRole } from '../../types';
 
 export const DemoRoleSwitcherHUD: React.FC = () => {
-  const { userRole, setUserRole, currentCity, setIsLocationModalOpen } = useStore();
+  const { userRole, setUserRole, currentCity, setIsLocationModalOpen, isBackendLive, services } = useStore();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
   const handleRoleChange = (role: UserRole) => {
     setUserRole(role);
+    services.auth.switchRoleDemo(role).catch(() => {});
     if (role === 'CUSTOMER') {
       if (!location.pathname.startsWith('/customer') && location.pathname !== '/') {
         navigate('/');
@@ -66,12 +67,20 @@ export const DemoRoleSwitcherHUD: React.FC = () => {
   return (
     <div className="no-print sticky top-0 z-50 bg-slate-950 text-white border-b border-slate-800 shadow-md">
       <div className="max-w-7xl mx-auto px-3 sm:px-4 py-1.5 flex items-center justify-between text-xs">
-        {/* Left: Persona badge */}
+        {/* Left: Persona & Backend status badge */}
         <div className="flex items-center gap-2">
-          <span className="flex items-center gap-1.5 bg-amber-500/20 text-amber-400 font-bold px-2 py-0.5 rounded-md border border-amber-500/30 text-[11px] tracking-wide uppercase">
-            <Sparkles className="w-3 h-3 text-amber-400 animate-pulse" />
-            Phase 1 Interactive Demo
-          </span>
+          <div
+            className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[11px] font-bold tracking-wide uppercase transition-all duration-300"
+            style={{
+              borderColor: isBackendLive ? 'rgba(34, 197, 94, 0.4)' : 'rgba(245, 158, 11, 0.3)',
+              backgroundColor: isBackendLive ? 'rgba(34, 197, 94, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+              color: isBackendLive ? '#4ade80' : '#fbbf24',
+            }}
+            title={isBackendLive ? 'Connected to Fastify + PostgreSQL' : 'Fallback local state mode'}
+          >
+            <span className={`w-2 h-2 rounded-full ${isBackendLive ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+            <span>{isBackendLive ? 'PostgreSQL Live' : 'Phase 2 Live'}</span>
+          </div>
 
           <span className="hidden sm:inline-block text-slate-400 font-mono text-[11px]">|</span>
 

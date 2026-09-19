@@ -36,6 +36,7 @@ import {
   partnerService,
   warehouseService,
   notificationService,
+  checkBackendHealth,
 } from '../services';
 
 interface StoreContextType {
@@ -48,6 +49,7 @@ interface StoreContextType {
   setPincode: (pin: string) => void;
   isLocationModalOpen: boolean;
   setIsLocationModalOpen: (open: boolean) => void;
+  isBackendLive: boolean;
 
   // Catalog
   products: Product[];
@@ -255,6 +257,47 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Mapping Queue
   const [mappingQueue, setMappingQueue] = useState<MasterCatalogMappingItem[]>(INITIAL_MAPPING_QUEUE);
+
+  // PostgreSQL Backend Connectivity State
+  const [isBackendLive, setIsBackendLive] = useState<boolean>(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function initFromBackend() {
+      try {
+        const health = await checkBackendHealth();
+        if (health.ok) {
+          if (isMounted) setIsBackendLive(true);
+          const liveProducts = await productService.getProducts();
+          if (isMounted && liveProducts && liveProducts.length > 0) {
+            setProducts(liveProducts);
+          }
+          const liveOrders = await orderService.getOrders();
+          if (isMounted && liveOrders && liveOrders.length > 0) {
+            setOrders(liveOrders);
+          }
+          const liveInv = await inventoryService.getRetailerInventory();
+          if (isMounted && liveInv && liveInv.length > 0) {
+            setRetailerInventory(liveInv);
+          }
+          const liveWh = await warehouseService.getWarehouses();
+          if (isMounted && liveWh && liveWh.length > 0) {
+            setWarehouses(liveWh);
+          }
+          const liveQueue = await productService.getMappingQueue();
+          if (isMounted && liveQueue && liveQueue.length > 0) {
+            setMappingQueue(liveQueue);
+          }
+        }
+      } catch (err) {
+        console.warn('[StoreContext] Running with offline/demo state:', err);
+      }
+    }
+    initFromBackend();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Persist role, cart, orders, quotes
   useEffect(() => {
@@ -1018,6 +1061,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setPincode,
         isLocationModalOpen,
         setIsLocationModalOpen,
+        isBackendLive,
         products,
         getProductById,
         getProductBySku,
