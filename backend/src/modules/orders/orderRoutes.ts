@@ -6,6 +6,8 @@ import { paymentService } from '../payments/payment.service.js';
 import { fulfillmentSelectionService } from '../fulfillment/fulfillment-selection.service.js';
 import { FulfillmentCartItem } from '../fulfillment/fulfillment.types.js';
 import { notificationService } from '../notifications/notification.service.js';
+import { auditService } from '../audit/audit.service.js';
+import { inventoryLedgerService } from '../inventory/inventory.ledger.service.js';
 
 export async function orderRoutes(fastify: FastifyInstance) {
   // Create unified order with multi-store split fulfillment
@@ -75,6 +77,21 @@ export async function orderRoutes(fastify: FastifyInstance) {
         instance: request.url,
         requestId: request.id,
       });
+    }
+
+    // Inactive SKU validation: reject inactive or deprecated SKUs
+    for (const item of cart) {
+      const skuCode = item.product?.sku || item.sku || item.sku_code;
+      const skuCheck = await db.query('SELECT id, is_active FROM skus WHERE sku_code = $1 OR id = $1', [skuCode]);
+      if (skuCheck.rows.length > 0 && !skuCheck.rows[0].is_active) {
+        return reply.status(400).send({
+          type: 'https://api.electrakart.com/errors/inactive-sku',
+          title: 'Inactive SKU',
+          status: 400,
+          detail: `SKU '${skuCode}' is inactive or deprecated and cannot be ordered.`,
+          instance: request.url,
+        });
+      }
     }
 
     // 3. Authoritative fulfillment planning
@@ -663,7 +680,7 @@ export async function orderRoutes(fastify: FastifyInstance) {
 
     // Check fulfillment existence
     const fRes = await db.query(
-      'SELECT partner_id FROM order_fulfillments WHERE id = $1 AND order_id = $2',
+      'SELECT partner_id, status FROM order_fulfillments WHERE id = $1 AND order_id = $2',
       [fulfillmentId, orderId]
     );
 
@@ -705,6 +722,40 @@ export async function orderRoutes(fastify: FastifyInstance) {
       }
     }
 
+    // Idempotent check: if status is already the requested status, safely return
+    if (ful.status === status) {
+      return reply.send({
+        orderId,
+        fulfillmentId,
+        status,
+        updatedAt: new Date().toISOString(),
+        idempotent: true,
+      });
+    }
+
+    // Enforce linear forward state machine progression (reject invalid/backwards transitions)
+    const validTransitions: Record<string, string[]> = {
+      CONFIRMED: ['PREPARING', 'PACKED', 'DISPATCHED', 'CANCELLED'],
+      PARTNER_ACCEPTED: ['PREPARING', 'PACKED', 'DISPATCHED', 'CANCELLED'],
+      PREPARING: ['PACKED', 'DISPATCHED', 'CANCELLED'],
+      PACKED: ['DISPATCHED', 'OUT_FOR_DELIVERY', 'CANCELLED'],
+      DISPATCHED: ['OUT_FOR_DELIVERY', 'DELIVERED'],
+      OUT_FOR_DELIVERY: ['DELIVERED'],
+      DELIVERED: [], // Terminal status!
+      CANCELLED: [], // Terminal status!
+    };
+
+    const allowedNext = validTransitions[ful.status] || [];
+    if (!allowedNext.includes(status)) {
+      return reply.status(400).send({
+        type: 'https://api.electrakart.com/errors/invalid-state-transition',
+        title: 'Invalid State Transition',
+        status: 400,
+        detail: `Cannot transition fulfillment from '${ful.status}' to '${status}'. Reverse or out-of-order transitions are prohibited.`,
+        instance: request.url,
+      });
+    }
+
     await db.withTransaction(async (tx) => {
       await tx.query(
         `UPDATE order_fulfillments 
@@ -726,7 +777,7 @@ export async function orderRoutes(fastify: FastifyInstance) {
         ]
       );
 
-      // If delivered, finalize inventory deduction
+      // If delivered, finalize inventory deduction and record FULFILLMENT in ledger
       if (status === 'DELIVERED') {
         const items = await tx.query(
           'SELECT sku_code, quantity FROM fulfillment_items WHERE fulfillment_id = $1',
@@ -735,13 +786,43 @@ export async function orderRoutes(fastify: FastifyInstance) {
         const partnerId = ful.partner_id;
 
         for (const item of items.rows) {
-          await tx.query(
-            `UPDATE partner_inventories
-             SET in_stock_quantity = GREATEST(0, in_stock_quantity - $1),
-                 reserved_quantity = GREATEST(0, reserved_quantity - $1)
-             WHERE partner_id = $2 AND sku_code = $3`,
-            [item.quantity, partnerId, item.sku_code]
+          const invLookup = await tx.query(
+            'SELECT id, in_stock_quantity, available_quantity FROM partner_inventories WHERE partner_id = $1 AND sku_code = $2 FOR UPDATE',
+            [partnerId, item.sku_code]
           );
+
+          if (invLookup.rows.length > 0) {
+            const currentInv = invLookup.rows[0];
+            const prevInStock = currentInv.in_stock_quantity;
+            const newInStock = Math.max(0, prevInStock - item.quantity);
+
+            await tx.query(
+              `UPDATE partner_inventories
+               SET in_stock_quantity = $1,
+                   reserved_quantity = GREATEST(0, reserved_quantity - $2),
+                   last_updated = NOW()
+               WHERE id = $3`,
+              [newInStock, item.quantity, currentInv.id]
+            );
+
+            await inventoryLedgerService.recordEntry(
+              {
+                inventoryId: currentInv.id,
+                partnerId,
+                skuCode: item.sku_code,
+                transactionType: 'FULFILLMENT',
+                quantityChange: -item.quantity,
+                previousQuantity: prevInStock,
+                newQuantity: newInStock,
+                referenceType: 'FULFILLMENT',
+                referenceId: fulfillmentId,
+                notes: `Fulfilled for order ${orderId}`,
+                createdByUserId: user?.id,
+                metadata: { orderId, fulfillmentId },
+              },
+              tx
+            );
+          }
         }
       }
 

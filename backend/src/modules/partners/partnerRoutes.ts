@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { db } from '../../db/connection.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requireRole } from '../../middleware/rbac.js';
+import { auditService } from '../audit/audit.service.js';
 
 export async function partnerRoutes(fastify: FastifyInstance) {
   // List partners
@@ -150,6 +151,9 @@ export async function partnerRoutes(fastify: FastifyInstance) {
 
       const cRate = commissionRate !== undefined ? commissionRate : commissionRatePercent;
 
+      const prevRes = await db.query('SELECT status, commission_rate_percent FROM partners WHERE id = $1', [id]);
+      const prev = prevRes.rows[0] || {};
+
       await db.query(
         `UPDATE partners
          SET status = COALESCE($1, status),
@@ -159,6 +163,17 @@ export async function partnerRoutes(fastify: FastifyInstance) {
          WHERE id = $4`,
         [status, cRate, deliveryRadiusKm, id]
       );
+
+      await auditService.recordLog({
+        actorUserId: request.user!.id,
+        action: 'KYC_STATUS_CHANGE',
+        entityType: 'PARTNER',
+        entityId: id,
+        oldValue: { status: prev.status, commissionRate: prev.commission_rate_percent },
+        newValue: { status, commissionRate: cRate, deliveryRadiusKm },
+        ipAddress: request.ip,
+        requestId: request.id,
+      });
 
       return reply.send({
         id,

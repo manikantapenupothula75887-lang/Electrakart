@@ -17,6 +17,8 @@ import {
   PartnerSettlementRecord,
 } from './payment.types.js';
 import { notificationService } from '../notifications/notification.service.js';
+import { auditService } from '../audit/audit.service.js';
+import { inventoryLedgerService } from '../inventory/inventory.ledger.service.js';
 
 export class PaymentService {
   /**
@@ -41,6 +43,12 @@ export class PaymentService {
 
       if (!skuCode || qty <= 0) {
         throw new Error(`Invalid item in cart: SKU '${skuCode}', quantity ${qty}`);
+      }
+
+      // Check if SKU is active
+      const skuActiveRes = await db.query('SELECT id, is_active FROM skus WHERE sku_code = $1 OR id = $1', [skuCode]);
+      if (skuActiveRes.rows.length > 0 && !skuActiveRes.rows[0].is_active) {
+        throw new Error(`SKU '${skuCode}' is inactive or deprecated and cannot be ordered.`);
       }
 
       // Authoritative database price and stock lookup
@@ -643,6 +651,18 @@ export class PaymentService {
       throw new Error('Forbidden: You do not have permission to cancel another customer’s order.');
     }
 
+    // Idempotent check: If already cancelled, safely return without double release or refund
+    if (order.overall_status === 'CANCELLED') {
+      return {
+        orderId,
+        orderNumber: order.order_number,
+        overallStatus: 'CANCELLED',
+        inventoryReleased: false,
+        refundProcessed: false,
+        alreadyCancelled: true,
+      };
+    }
+
     // Cancellation policy check: cannot cancel if DISPATCHED, OUT_FOR_DELIVERY, or DELIVERED
     const fulRes = await db.query('SELECT status FROM order_fulfillments WHERE order_id = $1', [orderId]);
     const prohibitedStatuses = ['DISPATCHED', 'OUT_FOR_DELIVERY', 'DELIVERED'];
@@ -654,7 +674,7 @@ export class PaymentService {
       );
     }
 
-    return await db.withTransaction(async (tx) => {
+    const txResult = await db.withTransaction(async (tx) => {
       // Lock order
       await tx.query('SELECT id FROM orders WHERE id = $1 FOR UPDATE', [orderId]);
 
@@ -687,21 +707,23 @@ export class PaymentService {
             [newReserved, newAvailable, inv.id]
           );
 
-          // Record inventory cancellation transaction
-          await tx.query(
-            `INSERT INTO inventory_transactions (id, inventory_id, partner_id, sku_code, transaction_type, quantity_change, previous_quantity, new_quantity, reference_id, notes)
-             VALUES ($1, $2, $3, $4, 'RELEASE_CANCELLED', $5, $6, $7, $8, $9)`,
-            [
-              `tx-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-              inv.id,
-              item.partner_id,
-              item.sku_code,
-              item.quantity,
-              inv.available_quantity,
-              newAvailable,
-              orderId,
-              `Reserved inventory released due to order cancellation: ${reason}`,
-            ]
+          // Record inventory cancellation transaction in ledger
+          await inventoryLedgerService.recordEntry(
+            {
+              inventoryId: inv.id,
+              partnerId: item.partner_id,
+              skuCode: item.sku_code,
+              transactionType: 'CANCELLATION_RELEASE',
+              quantityChange: item.quantity,
+              previousQuantity: inv.available_quantity,
+              newQuantity: newAvailable,
+              referenceType: 'ORDER',
+              referenceId: orderId,
+              notes: `Reserved inventory released due to order cancellation: ${reason}`,
+              createdByUserId: user?.id,
+              metadata: { orderId, reason },
+            },
+            tx
           );
         }
       }
@@ -719,6 +741,12 @@ export class PaymentService {
         `UPDATE orders 
          SET overall_status = 'CANCELLED', updated_at = NOW() 
          WHERE id = $1`,
+        [orderId]
+      );
+
+      // Cancel any pending partner settlements for this order
+      await tx.query(
+        "UPDATE partner_settlements SET status = 'CANCELLED' WHERE order_id = $1",
         [orderId]
       );
 
@@ -751,6 +779,20 @@ export class PaymentService {
         refundProcessed: !!refundResult,
       };
     });
+
+    // Audit log order cancellation
+    await auditService.recordLog({
+      actorUserId: user?.id,
+      action: 'ORDER_STATUS_CHANGE',
+      entityType: 'ORDER',
+      entityId: orderId,
+      oldValue: { overallStatus: order.overall_status },
+      newValue: { overallStatus: 'CANCELLED', reason },
+      ipAddress: null,
+      requestId: null,
+    });
+
+    return txResult;
   }
 
   /**
@@ -767,6 +809,12 @@ export class PaymentService {
     }
 
     const payment = payRes.rows[0];
+
+    // Duplicate refund prevention
+    if (payment.refund_status === 'REFUNDED' || payment.status === 'REFUNDED') {
+      throw new Error(`Payment '${input.paymentId}' has already been refunded.`);
+    }
+
     if (payment.status !== 'CAPTURED') {
       throw new Error(`Cannot refund payment in status '${payment.status}'. Must be CAPTURED.`);
     }
@@ -796,6 +844,17 @@ export class PaymentService {
          WHERE id = $1`,
         [payment.order_id]
       );
+
+      await auditService.recordLog({
+        actorUserId: adminUser?.id,
+        action: 'PAYMENT_REFUND',
+        entityType: 'PAYMENT',
+        entityId: payment.id,
+        oldValue: { refundStatus: payment.refund_status, amount: payment.amount_inr },
+        newValue: { refundStatus: refundResult.refundStatus, amount: refundResult.amountInr },
+        ipAddress: null,
+        requestId: null,
+      });
     }
 
     return refundResult;

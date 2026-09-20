@@ -586,3 +586,46 @@ JOIN categories c ON s.category_id = c.id
 JOIN brands b ON s.brand_id = b.id
 JOIN brand_series bs ON s.series_id = bs.id
 WHERE s.is_active = TRUE;
+
+-- ============================================================================
+-- 8. PHASE 3G: AUDIT LOGS & STOCK TRANSFERS
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id VARCHAR(64) PRIMARY KEY,
+    actor_user_id VARCHAR(64) REFERENCES users(id) ON DELETE SET NULL,
+    action VARCHAR(100) NOT NULL,
+    entity_type VARCHAR(50) NOT NULL,
+    entity_id VARCHAR(64) NOT NULL,
+    old_value JSONB,
+    new_value JSONB,
+    ip_address VARCHAR(50),
+    request_id VARCHAR(100),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS stock_transfers (
+    id VARCHAR(64) PRIMARY KEY,
+    transfer_number VARCHAR(50) UNIQUE NOT NULL,
+    partner_id VARCHAR(64) NOT NULL REFERENCES partners(id) ON DELETE RESTRICT,
+    source_warehouse_id VARCHAR(64) NOT NULL REFERENCES warehouses(id) ON DELETE RESTRICT,
+    destination_warehouse_id VARCHAR(64) NOT NULL REFERENCES warehouses(id) ON DELETE RESTRICT,
+    sku_id VARCHAR(64) REFERENCES skus(id),
+    sku_code VARCHAR(80) NOT NULL,
+    quantity INT NOT NULL CHECK (quantity > 0),
+    status VARCHAR(50) NOT NULL DEFAULT 'TRANSFER_CREATED' CHECK (status IN ('TRANSFER_CREATED', 'TRANSFER_APPROVED', 'TRANSFER_IN_TRANSIT', 'TRANSFER_RECEIVED', 'TRANSFER_CANCELLED')),
+    reason TEXT,
+    created_by_user_id VARCHAR(64) REFERENCES users(id),
+    approved_by_user_id VARCHAR(64) REFERENCES users(id),
+    dispatched_at TIMESTAMPTZ,
+    received_at TIMESTAMPTZ,
+    cancelled_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_partner ON stock_transfers(partner_id, status);
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_src ON stock_transfers(source_warehouse_id);
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_dst ON stock_transfers(destination_warehouse_id);
+

@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { db } from '../../db/connection.js';
 import { optionalAuthenticate } from '../../middleware/auth.js';
 import { checkIdempotency, recordIdempotency } from '../../middleware/idempotency.js';
+import { auditService } from '../audit/audit.service.js';
 
 export async function quotationRoutes(fastify: FastifyInstance) {
   // Generate 48-hour locked quotation (with idempotency support)
@@ -209,6 +210,13 @@ export async function quotationRoutes(fastify: FastifyInstance) {
       [quotation.id]
     );
 
+    let currentStatus = quotation.status;
+    const isPastExpiry = new Date(quotation.locked_until_timestamp).getTime() < Date.now();
+    if (isPastExpiry && (currentStatus === 'LOCKED' || currentStatus === 'GENERATED')) {
+      currentStatus = 'EXPIRED';
+      await db.query("UPDATE quotations SET status = 'EXPIRED' WHERE id = $1", [quotation.id]);
+    }
+
     return reply.send({
       id: quotation.id,
       quotationNumber: quotation.quotation_number,
@@ -225,16 +233,19 @@ export async function quotationRoutes(fastify: FastifyInstance) {
       gstTotal: parseFloat(quotation.gst_total_inr),
       grandTotal: parseFloat(quotation.grand_total_inr),
       isPriceLocked: quotation.is_price_locked,
-      status: quotation.status,
+      status: currentStatus,
       items: itemsRes.rows,
     });
   });
 
-  // Accept quotation
+  // Accept quotation (with server-authoritative 48-hour price lock expiry enforcement)
   fastify.post('/quotations/:id/accept', { preHandler: [optionalAuthenticate] }, async (request, reply) => {
     const { id } = request.params as any;
 
-    const qRes = await db.query('SELECT customer_id FROM quotations WHERE id = $1 OR quotation_number = $1 LIMIT 1', [id]);
+    const qRes = await db.query(
+      'SELECT id, quotation_number, customer_id, status, locked_until_timestamp FROM quotations WHERE id = $1 OR quotation_number = $1 LIMIT 1',
+      [id]
+    );
     if (qRes.rows.length === 0) {
       return reply.status(404).send({
         type: 'https://api.electrakart.com/errors/not-found',
@@ -245,7 +256,10 @@ export async function quotationRoutes(fastify: FastifyInstance) {
       });
     }
 
-    if (request.user?.role === 'CUSTOMER' && qRes.rows[0].customer_id && qRes.rows[0].customer_id !== request.user.id) {
+    const quotation = qRes.rows[0];
+
+    // IDOR Protection
+    if (request.user?.role === 'CUSTOMER' && quotation.customer_id && quotation.customer_id !== request.user.id) {
       return reply.status(403).send({
         type: 'https://api.electrakart.com/errors/forbidden',
         title: 'Forbidden',
@@ -255,11 +269,106 @@ export async function quotationRoutes(fastify: FastifyInstance) {
       });
     }
 
+    // Authoritative Server Expiry Check (Never trust client)
+    const isPastExpiry = new Date(quotation.locked_until_timestamp).getTime() < Date.now();
+    if (isPastExpiry || quotation.status === 'EXPIRED') {
+      await db.query("UPDATE quotations SET status = 'EXPIRED' WHERE id = $1", [quotation.id]);
+      return reply.status(410).send({
+        type: 'https://api.electrakart.com/errors/quotation-expired',
+        title: 'Quotation Expired',
+        status: 410,
+        detail: 'This quotation has expired past its 48-hour price lock period and cannot be accepted. Please generate a fresh quotation.',
+        instance: request.url,
+      });
+    }
+
+    if (quotation.status === 'CANCELLED') {
+      return reply.status(400).send({
+        type: 'https://api.electrakart.com/errors/invalid-state',
+        title: 'Quotation Cancelled',
+        status: 400,
+        detail: 'This quotation has been cancelled and cannot be accepted.',
+        instance: request.url,
+      });
+    }
+
+    if (quotation.status === 'ACCEPTED') {
+      return reply.send({ status: 'ACCEPTED', quotationId: quotation.id, quotationNumber: quotation.quotation_number });
+    }
+
     await db.query(
-      "UPDATE quotations SET status = 'ACCEPTED' WHERE id = $1 OR quotation_number = $1",
-      [id]
+      "UPDATE quotations SET status = 'ACCEPTED' WHERE id = $1",
+      [quotation.id]
     );
 
-    return reply.send({ status: 'ACCEPTED', quotationId: id });
+    await auditService.recordLog({
+      actorUserId: request.user?.id || quotation.customer_id,
+      action: 'QUOTATION_ACCEPT',
+      entityType: 'QUOTATION',
+      entityId: quotation.id,
+      oldValue: { status: quotation.status },
+      newValue: { status: 'ACCEPTED' },
+      ipAddress: request.ip,
+      requestId: request.id,
+    });
+
+    return reply.send({ status: 'ACCEPTED', quotationId: quotation.id, quotationNumber: quotation.quotation_number });
+  });
+
+  // Cancel quotation
+  fastify.post('/quotations/:id/cancel', { preHandler: [optionalAuthenticate] }, async (request, reply) => {
+    const { id } = request.params as any;
+
+    const qRes = await db.query(
+      'SELECT id, quotation_number, customer_id, status FROM quotations WHERE id = $1 OR quotation_number = $1 LIMIT 1',
+      [id]
+    );
+    if (qRes.rows.length === 0) {
+      return reply.status(404).send({
+        type: 'https://api.electrakart.com/errors/not-found',
+        title: 'Quotation Not Found',
+        status: 404,
+        detail: `Quotation '${id}' was not found.`,
+        instance: request.url,
+      });
+    }
+
+    const quotation = qRes.rows[0];
+
+    // IDOR Protection
+    if (request.user?.role === 'CUSTOMER' && quotation.customer_id && quotation.customer_id !== request.user.id) {
+      return reply.status(403).send({
+        type: 'https://api.electrakart.com/errors/forbidden',
+        title: 'Forbidden',
+        status: 403,
+        detail: 'You do not have permission to cancel another customer’s quotation.',
+        instance: request.url,
+      });
+    }
+
+    if (quotation.status === 'ORDERED') {
+      return reply.status(400).send({
+        type: 'https://api.electrakart.com/errors/invalid-state',
+        title: 'Cannot Cancel Ordered Quotation',
+        status: 400,
+        detail: 'This quotation has already been converted into an order and cannot be cancelled directly.',
+        instance: request.url,
+      });
+    }
+
+    await db.query("UPDATE quotations SET status = 'CANCELLED' WHERE id = $1", [quotation.id]);
+
+    await auditService.recordLog({
+      actorUserId: request.user?.id || quotation.customer_id,
+      action: 'QUOTATION_CANCEL',
+      entityType: 'QUOTATION',
+      entityId: quotation.id,
+      oldValue: { status: quotation.status },
+      newValue: { status: 'CANCELLED' },
+      ipAddress: request.ip,
+      requestId: request.id,
+    });
+
+    return reply.send({ status: 'CANCELLED', quotationId: quotation.id, quotationNumber: quotation.quotation_number });
   });
 }

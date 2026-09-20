@@ -8,6 +8,7 @@ import { runPaymentsTests } from './payments.test.js';
 import { runEstimateOcrTests } from './estimate_ocr.test.js';
 import { runLocationFulfillmentTests } from './location_fulfillment.test.js';
 import { runNotificationCommunicationTests } from './notification_communication.test.js';
+import { runBusinessCompletionTests } from './business_completion.test.js';
 import { db } from '../src/db/connection.js';
 
 async function run() {
@@ -29,6 +30,7 @@ async function run() {
     await runEstimateOcrTests();
     await runLocationFulfillmentTests();
     await runNotificationCommunicationTests();
+    await runBusinessCompletionTests();
 
     console.log('\n====================================================');
     console.log('  🎉 ALL BACKEND TESTS PASSED (100% SUCCESS)');

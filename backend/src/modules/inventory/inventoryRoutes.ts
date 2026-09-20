@@ -2,6 +2,8 @@ import { FastifyInstance } from 'fastify';
 import { db } from '../../db/connection.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requireRole } from '../../middleware/rbac.js';
+import { inventoryLedgerService } from './inventory.ledger.service.js';
+import { auditService } from '../audit/audit.service.js';
 
 export async function inventoryRoutes(fastify: FastifyInstance) {
   // Get stock for authenticated partner (Retailer or Distributor) with IDOR protection
@@ -124,22 +126,35 @@ export async function inventoryRoutes(fastify: FastifyInstance) {
           [newInStock, newAvailable, inv.id]
         );
 
-        await tx.query(
-          `INSERT INTO inventory_transactions (id, inventory_id, partner_id, sku_code, transaction_type, quantity_change, previous_quantity, new_quantity, notes, created_by_user_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-          [
-            `tx-${Date.now()}`,
-            inv.id,
+        await inventoryLedgerService.recordEntry(
+          {
+            inventoryId: inv.id,
             partnerId,
-            sku,
-            reason,
-            deltaQuantity,
-            previousQty,
-            newInStock,
-            notes || 'Cycle count adjustment',
-            request.user!.id,
-          ]
+            skuCode: sku,
+            transactionType: 'ADJUSTMENT',
+            quantityChange: deltaQuantity,
+            previousQuantity: previousQty,
+            newQuantity: newInStock,
+            referenceType: 'MANUAL_ADJUSTMENT',
+            referenceId: `adj-${Date.now()}`,
+            notes: notes || 'Cycle count adjustment',
+            createdByUserId: request.user!.id,
+            metadata: { reason, deltaQuantity, previousQty, newInStock },
+          },
+          tx
         );
+      });
+
+      // Audit log sensitive inventory change
+      await auditService.recordLog({
+        actorUserId: request.user!.id,
+        action: 'INVENTORY_ADJUSTMENT',
+        entityType: 'INVENTORY',
+        entityId: inv.id,
+        oldValue: { inStock: previousQty, available: inv.available_quantity, sku },
+        newValue: { inStock: newInStock, available: newAvailable, sku, deltaQuantity },
+        ipAddress: request.ip,
+        requestId: request.id,
       });
 
       return reply.send({
@@ -283,4 +298,40 @@ export async function inventoryRoutes(fastify: FastifyInstance) {
 
     return reply.send(res.rows);
   });
+
+  // Get Inventory Ledger Transactions (RBAC: RETAILER, DISTRIBUTOR, ADMIN only. CUSTOMER forbidden)
+  fastify.get(
+    '/inventory/transactions',
+    { preHandler: [authenticate, requireRole('RETAILER', 'DISTRIBUTOR', 'ADMIN')] },
+    async (request, reply) => {
+      const user = request.user!;
+      const query = request.query as any;
+      let partnerId = user.partnerId;
+
+      if (user.role === 'ADMIN') {
+        partnerId = query.partnerId || undefined;
+      } else if (query.partnerId && query.partnerId !== user.partnerId) {
+        return reply.status(403).send({
+          type: 'https://api.electrakart.com/errors/forbidden',
+          title: 'Forbidden',
+          status: 403,
+          detail: 'You are not authorized to view another partner’s inventory ledger transactions.',
+          instance: request.url,
+        });
+      }
+
+      const transactions = await inventoryLedgerService.getTransactions({
+        partnerId,
+        warehouseId: query.warehouseId,
+        skuCode: query.sku,
+        referenceId: query.referenceId,
+        transactionType: query.type,
+        limit: query.limit ? parseInt(query.limit, 10) : 50,
+        offset: query.offset ? parseInt(query.offset, 10) : 0,
+      });
+
+      return reply.send(transactions);
+    }
+  );
 }
+
