@@ -621,7 +621,7 @@ CREATE TABLE settlements (
     billing_period_end DATE NOT NULL,
     gross_sales_inr NUMERIC(12, 2) NOT NULL,
     platform_commission_inr NUMERIC(12, 2) NOT NULL,
-    tds_deducted_inr NUMERIC(10, 2) NOT NULL DEFAULT 0.00, -- 1% Section 194-O TDS
+    tds_deducted_inr NUMERIC(10, 2) NOT NULL DEFAULT 0.00, -- Configurable TDS deduction (e.g. 1%). Subject to statutory legal/tax verification prior to production launch.
     net_payout_inr NUMERIC(12, 2) NOT NULL,
     status settlement_status NOT NULL DEFAULT 'PENDING',
     bank_utr_number VARCHAR(100),

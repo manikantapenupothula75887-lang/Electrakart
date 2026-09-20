@@ -75,6 +75,8 @@ const INSECURE_DEV_SECRETS = [
   'CHANGE_ME_TO_A_LONG_RANDOM_PRODUCTION_SECRET',
   'CHANGE_ME_TO_A_LONG_RANDOM_SECRET',
   'electrakart_development_jwt_secret_key_32bytes_minimum',
+  'GENERATED_64_CHAR_HIGH_ENTROPY_CRYPTOGRAPHIC_KEY_STRING_HERE',
+  'test-electrakart-secret-key-998877665544',
 ];
 
 export function getValidatedConfig(customEnv?: NodeJS.ProcessEnv): Config {

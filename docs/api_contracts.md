@@ -571,7 +571,8 @@
 
 ### 8.2 Update Partner Fulfillment Status (Partner / Driver App)
 `POST /api/v1/orders/{orderId}/fulfillments/{fulfillmentId}/status`  
-*Access:* `RETAILER`, `DISTRIBUTOR`, `ADMIN`
+*Access:* `RETAILER`, `DISTRIBUTOR`, `ADMIN`  
+*Linear State Lifecycle:* `CONFIRMED` $\to$ `PREPARING` $\to$ `PACKED` $\to$ `DISPATCHED` $\to$ `DELIVERED`. Backward or illegal transitions return `400 Bad Request`. Handover at `DELIVERED` requires customer delivery OTP.
 
 **Request:**
 ```json
@@ -850,7 +851,7 @@
 *Access:* `CUSTOMER` (Owner), `ADMIN`  
 *Business Rules:*
 - Orders in `CONFIRMED` or `PREPARING` status are cancellable.
-- Orders already `DISPATCHED` or `DELIVERED` reject cancellation with `409 Conflict`.
+- Orders already `DISPATCHED`, `OUT_FOR_DELIVERY`, or `DELIVERED` reject cancellation with `409 Conflict`.
 - Cancelling an order automatically releases reserved inventory back to available stock.
 - Idempotent: Repeat cancellation of an already cancelled order returns `200 OK` with existing status.
 

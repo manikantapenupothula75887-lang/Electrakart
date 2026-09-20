@@ -90,7 +90,7 @@ The audit followed a multi-tier verification methodology:
 ### Section 6: Order Lifecycle State Machine and Invariants
 - **Status:** `PASS`
 - **Verification Details:**
-  - Valid status transitions verified: `CONFIRMED` $\to$ `PREPARING` $\to$ `PACKED` $\to$ `DISPATCHED` $\to$ `DELIVERED`.
+  - Valid status transitions verified across the linear order fulfillment state machine: `CONFIRMED` $\to$ `PREPARING` $\to$ `PACKED` $\to$ `DISPATCHED` $\to$ `DELIVERED`.
   - Out-of-order transitions are blocked.
   - Delivery completion generates an immutable customer tax invoice.
 
@@ -160,13 +160,13 @@ The audit followed a multi-tier verification methodology:
 ### Section 15: Settlement Engine, TDS, and Financial Accounting
 - **Status:** `PASS WITH LIMITATION`
 - **Verification Details:**
-  - Weekly partner settlement calculation enforces mathematical invariants:
+  - Weekly partner settlement calculation enforces mathematical double-entry invariants:
     $$\text{Platform Commission} = \text{Gross Sales} \times \text{Commission Rate}$$
-    $$\text{TDS (Section 194-O)} = \text{Gross Sales} \times 1\%$$
+    $$\text{Configurable TDS} = \text{Gross Sales} \times \text{TDS Rate (e.g. 1\%)}$$
     $$\text{Net Partner Payout} = \text{Gross Sales} - \text{Platform Commission} - \text{TDS}$$
   - Tenant isolation verified: Retailers can only view their own settlement statements (`GET /api/v1/settlements`).
   - Admin disbursement endpoint (`POST /api/v1/admin/settlements/:id/disburse`) records bank UTR reference numbers and updates status to `SETTLED`.
-  - *Limitation:* Formal banking automated payout integration (RazorpayX, Cashfree Payouts, or host-to-host NEFT/RTGS) and signed GST tax consultant invoice sign-off are required prior to commercial financial settlement operations.
+  - *Limitation & Statutory Compliance Notice:* Tax treatment, governing provisions, rates, and thresholds require professional verification before production deployment. The software's configurable TDS deduction logic is an architectural capability and does NOT constitute legal or tax advice. Formal banking automated payout integration (RazorpayX, Cashfree Payouts, or host-to-host NEFT/RTGS) and signed GST/tax consultant invoice sign-off are required prior to commercial financial settlement operations.
 
 ### Section 16: Database Migrations, Schema Integrity, and Seed Data
 - **Status:** `PASS`
@@ -292,7 +292,7 @@ The audit followed a multi-tier verification methodology:
    - Verified that total units are conserved across states: `available = in_stock - reserved`.
    - Releasing stock upon order cancellation correctly decrements `reserved` and increments `available` without modifying actual physical warehouse count.
 2. **Settlement Arithmetic Accuracy:**
-   - Verified that partner payouts accurately deduct platform commission and statutory 1% TDS (under Section 194-O of the Indian Income Tax Act).
+   - Verified that partner payouts accurately deduct platform commission and configurable TDS (e.g. 1% default in test environment), subject to statutory tax verification prior to production launch.
    - Invariant: $\text{Gross Sales} = \text{Net Payout} + \text{Commission} + \text{TDS}$ holds to two decimal places ($0.01\text{ INR}$ rounding tolerance).
 
 ---
