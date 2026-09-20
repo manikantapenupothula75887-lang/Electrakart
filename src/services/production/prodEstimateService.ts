@@ -111,45 +111,75 @@ export class ProductionEstimateService implements IEstimateService {
     });
   }
 
-  async extractEstimate(sampleId?: string, rawCustomText?: string): Promise<EstimateExtractionResponse> {
+  async extractEstimate(
+    sampleId?: string,
+    rawCustomText?: string,
+    file?: { filename: string; mimeType: string; fileBase64: string }
+  ): Promise<EstimateExtractionResponse> {
     try {
-      const uploadRes = await apiClient.post<any>('/estimates/upload', { sampleId, rawCustomText });
-      const estRes = await apiClient.get<any>(`/estimates/${uploadRes.id}`);
+      const payload: any = {};
+      if (file) {
+        payload.filename = file.filename;
+        payload.mimeType = file.mimeType;
+        payload.fileBase64 = file.fileBase64;
+      } else if (rawCustomText) {
+        payload.rawCustomText = rawCustomText;
+      } else if (sampleId) {
+        payload.sampleId = sampleId;
+      } else {
+        payload.sampleId = 'estimate_sample_1';
+      }
 
-      const items: EstimateExtractedItem[] = (estRes.items || []).map((it: any) => ({
-        id: it.id,
-        rawText: it.rawText,
-        quantity: it.quantity,
-        unit: it.unit,
-        detectedBrand: 'Polycab',
-        detectedSeries: 'FlameX FR',
-        detectedConfig: 'Standard',
-        detectedSpec: it.rawText,
-        confidence: it.confidence,
-        reason: it.confidence === 'HIGH' ? 'High confidence match from catalog' : 'Series ambiguous, customer review required',
-        matchedProduct: PRODUCTS_DATA.find((p) => p.sku === it.matchedSku) || (it.confidence === 'HIGH' ? PRODUCTS_DATA[0] : undefined),
-        possibleOptions: it.confidence === 'MEDIUM' ? [
-          {
-            brand: 'Anchor',
-            series: 'Roma Classic (Modular)',
-            specification: '6A 1-Way Modular Switch (Smooth Rocker)',
-            matchedSku: 'ANC-ROM-6A1W-WHT',
-            productName: 'Anchor Roma Classic 6A 1-Way Modular Switch (Pack of 10)',
-            price: 460,
-          },
-          {
-            brand: 'Anchor',
-            series: 'Penta (Traditional Piano)',
-            specification: '6A 1-Way Piano Switch (Box of 20)',
-            matchedSku: 'ANC-PEN-6A1W-WHT',
-            productName: 'Anchor Penta 6A 1-Way Piano Switch White (Box of 20)',
-            price: 420,
-          },
-        ] : undefined,
-      }));
+      const uploadRes = await apiClient.post<any>('/estimates/upload', payload);
+      const estId = uploadRes.id || uploadRes.estimateId;
+      const estRes = await apiClient.get<any>(`/estimates/${estId}`);
+
+      const items: EstimateExtractedItem[] = (estRes.items || []).map((it: any) => {
+        const skuCode = it.matchedSkuCode || it.matchedSku;
+        const matchedProduct = skuCode
+          ? PRODUCTS_DATA.find((p) => p.sku === skuCode)
+          : undefined;
+
+        let conf: 'HIGH' | 'MEDIUM' | 'LOW' = 'MEDIUM';
+        if (it.confidence === 'HIGH' || it.matchStatus === 'EXACT_MATCH' || it.matchStatus === 'RESOLVED') {
+          conf = 'HIGH';
+        } else if (it.confidence === 'LOW' || it.matchStatus === 'NO_MATCH') {
+          conf = 'LOW';
+        }
+
+        const candidateOptions = (it.candidateOptions && it.candidateOptions.length > 0)
+          ? it.candidateOptions.map((opt: any) => ({
+              brand: opt.brand,
+              series: opt.series,
+              specification: opt.specification,
+              matchedSku: opt.sku,
+              productName: opt.name,
+              price: opt.price,
+            }))
+          : undefined;
+
+        return {
+          id: it.id,
+          rawText: it.rawText || it.rawLineText || 'Extracted item',
+          quantity: it.detectedQuantity || it.quantity || 1,
+          unit: it.detectedUnit || it.unit || 'Nos',
+          detectedBrand: it.detectedBrand || (matchedProduct ? matchedProduct.brand : 'Generic'),
+          detectedSeries: it.detectedSeries || (matchedProduct ? matchedProduct.series : 'Standard'),
+          detectedConfig: it.detectedConfig || 'Standard',
+          detectedSpec: it.detectedSpec || it.rawLineText || 'Verified specification',
+          confidence: conf,
+          reason:
+            it.matchingEvidence?.reasons?.join('. ') ||
+            (conf === 'HIGH'
+              ? 'Exact catalog SKU verified in master database'
+              : 'Specification clarification required'),
+          matchedProduct,
+          possibleOptions: candidateOptions,
+        };
+      });
 
       return {
-        estimateId: estRes.id,
+        estimateId: estId,
         extractedItems: items,
       };
     } catch (err) {
@@ -166,7 +196,7 @@ export class ProductionEstimateService implements IEstimateService {
     selectedMatch: { sku: string; brand: string; series: string; spec: string }
   ): Promise<EstimateExtractedItem | undefined> {
     try {
-      await apiClient.post(`/estimates/${estimateId}/items/${itemId}/resolve`, {
+      await apiClient.post(`/estimates/${estimateId}/items/${itemId}/clarify`, {
         chosenSku: selectedMatch.sku,
       });
       const prod = PRODUCTS_DATA.find((p) => p.sku === selectedMatch.sku) || PRODUCTS_DATA[0];

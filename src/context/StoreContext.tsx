@@ -414,6 +414,21 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // AI Estimate Processing Simulation
   const startEstimateAnalysis = async (sampleId?: string, rawCustomText?: string) => {
     setIsProcessingEstimate(true);
+    try {
+      const extracted = await estimateService.processEstimate(
+        sampleId,
+        rawCustomText,
+        (stage) => setEstimateStage(stage)
+      );
+      if (extracted && extracted.length > 0) {
+        setCurrentEstimateItems(extracted);
+        setIsProcessingEstimate(false);
+        return;
+      }
+    } catch (err) {
+      console.warn('[StoreContext] estimateService.processEstimate fallback:', err);
+    }
+
     const stages = [
       'Reading Estimate Document...',
       'Extracting Line Items & Quantities...',

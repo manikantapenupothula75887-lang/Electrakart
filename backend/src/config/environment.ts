@@ -37,6 +37,13 @@ export interface Config {
   cashfreeAppId: string;
   cashfreeSecretKey: string;
   cashfreeApiVersion: string;
+  ocrProvider: 'mock' | 'google_document_ai' | 'aws_textract';
+  googleDocAiProjectId: string;
+  googleDocAiLocation: string;
+  googleDocAiProcessorId: string;
+  awsTextractRegion: string;
+  awsTextractAccessKeyId: string;
+  awsTextractSecretAccessKey: string;
 }
 
 const INSECURE_DEV_SECRETS = [
@@ -109,6 +116,36 @@ export function getValidatedConfig(customEnv?: NodeJS.ProcessEnv): Config {
   const cashfreeSecretKey = env.CASHFREE_SECRET_KEY || '';
   const cashfreeApiVersion = env.CASHFREE_API_VERSION || '2023-08-01';
 
+  const ocrProvider = (env.OCR_PROVIDER || (isProd ? 'google_document_ai' : 'mock')).toLowerCase() as
+    | 'mock'
+    | 'google_document_ai'
+    | 'aws_textract';
+
+  if (isProd && (ocrProvider === 'mock' || env.OCR_PROVIDER === 'mock')) {
+    throw new Error(
+      '[Config Error] In production, OCR_PROVIDER cannot be "mock". A real OCR provider (e.g. google_document_ai or aws_textract) must be configured. Startup aborted.'
+    );
+  }
+
+  const googleDocAiProjectId = env.GOOGLE_DOC_AI_PROJECT_ID || '';
+  const googleDocAiLocation = env.GOOGLE_DOC_AI_LOCATION || 'us';
+  const googleDocAiProcessorId = env.GOOGLE_DOC_AI_PROCESSOR_ID || '';
+  const awsTextractRegion = env.AWS_TEXTRACT_REGION || env.AWS_REGION || 'ap-south-1';
+  const awsTextractAccessKeyId = env.AWS_TEXTRACT_ACCESS_KEY_ID || env.AWS_ACCESS_KEY_ID || '';
+  const awsTextractSecretAccessKey = env.AWS_TEXTRACT_SECRET_ACCESS_KEY || env.AWS_SECRET_ACCESS_KEY || '';
+
+  if (isProd && ocrProvider === 'google_document_ai' && !googleDocAiProcessorId) {
+    throw new Error(
+      '[Config Error] In production with OCR_PROVIDER=google_document_ai, GOOGLE_DOC_AI_PROCESSOR_ID must be set. Startup aborted.'
+    );
+  }
+
+  if (isProd && ocrProvider === 'aws_textract' && (!awsTextractAccessKeyId || !awsTextractSecretAccessKey)) {
+    throw new Error(
+      '[Config Error] In production with OCR_PROVIDER=aws_textract, AWS credentials must be set. Startup aborted.'
+    );
+  }
+
   return {
     nodeEnv: currentEnv,
     isProduction: isProd,
@@ -124,7 +161,7 @@ export function getValidatedConfig(customEnv?: NodeJS.ProcessEnv): Config {
     dbConnectionTimeoutMs: parseInt(env.DB_CONNECTION_TIMEOUT_MS || '5000', 10),
     rateLimitMax: parseInt(env.RATE_LIMIT_MAX || (isProd ? '100' : '200'), 10),
     rateLimitWindowMs: parseInt(env.RATE_LIMIT_WINDOW_MS || '60000', 10),
-    bodyLimitBytes: parseInt(env.BODY_LIMIT_BYTES || '1048576', 10),
+    bodyLimitBytes: parseInt(env.BODY_LIMIT_BYTES || '26214400', 10), // 25MB for document/photo uploads
     logLevel: env.LOG_LEVEL || (isProd ? 'info' : 'info'),
     paymentProvider,
     razorpayKeyId,
@@ -133,6 +170,13 @@ export function getValidatedConfig(customEnv?: NodeJS.ProcessEnv): Config {
     cashfreeAppId,
     cashfreeSecretKey,
     cashfreeApiVersion,
+    ocrProvider,
+    googleDocAiProjectId,
+    googleDocAiLocation,
+    googleDocAiProcessorId,
+    awsTextractRegion,
+    awsTextractAccessKeyId,
+    awsTextractSecretAccessKey,
   };
 }
 
