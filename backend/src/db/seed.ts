@@ -50,6 +50,16 @@ export async function seedDatabase(): Promise<void> {
       city: 'Vijayawada',
       pincode: '520002',
     },
+    {
+      id: 'usr-customer-2',
+      email: 'ravi.teja@gmail.com',
+      phone_number: '+919848199883',
+      password_hash: passwordHash,
+      full_name: 'Ravi Teja Sharma',
+      role: 'CUSTOMER',
+      city: 'Guntur',
+      pincode: '522002',
+    },
   ];
 
   for (const u of users) {
@@ -57,8 +67,13 @@ export async function seedDatabase(): Promise<void> {
       `INSERT INTO users (id, email, phone_number, password_hash, full_name, role, city, pincode)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (id) DO UPDATE SET
+         email = EXCLUDED.email,
+         phone_number = EXCLUDED.phone_number,
+         password_hash = EXCLUDED.password_hash,
          full_name = EXCLUDED.full_name,
-         role = EXCLUDED.role`,
+         role = EXCLUDED.role,
+         city = EXCLUDED.city,
+         pincode = EXCLUDED.pincode`,
       [u.id, u.email, u.phone_number, u.password_hash, u.full_name, u.role, u.city, u.pincode]
     );
   }
@@ -70,6 +85,95 @@ export async function seedDatabase(): Promise<void> {
      ON CONFLICT (user_id) DO NOTHING`,
     ['usr-customer-1', 'HOMEOWNER', '37AAAAA0000A1Z5', 'Reddy Electrical Works', 150000.0]
   );
+  await db.query(
+    `INSERT INTO customers (user_id, trade_account_type, billing_gstin, company_name, credit_limit_inr)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (user_id) DO NOTHING`,
+    ['usr-customer-2', 'CONTRACTOR', '37BBBAA1111A1Z1', 'Teja Electrical Installations', 200000.0]
+  );
+
+  // 2.5 Seed Customer Addresses (Multi-address & location provenance)
+  const addresses = [
+    {
+      id: 'addr-cust1-home',
+      user_id: 'usr-customer-1',
+      recipient_name: 'Anil Kumar Reddy',
+      phone_number: '+919848199882',
+      address_line1: 'Flat 402, Sri Krishna Residency, Moghalrajpuram',
+      address_line2: 'Near Siddhartha College',
+      landmark: 'Siddhartha College',
+      city: 'Vijayawada',
+      state: 'Andhra Pradesh',
+      pincode: '520010',
+      country: 'India',
+      address_type: 'HOME',
+      is_default: true,
+      source: 'SAVED_ADDRESS',
+      latitude: 16.5062,
+      longitude: 80.6517,
+      normalized_address: 'Flat 402, Sri Krishna Residency, Moghalrajpuram, Near Siddhartha College, Vijayawada, Andhra Pradesh 520010',
+    },
+    {
+      id: 'addr-cust1-office',
+      user_id: 'usr-customer-1',
+      recipient_name: 'Anil Kumar Reddy',
+      phone_number: '+919848199882',
+      address_line1: 'D.No 29-14-52, Prakasam Road, Governorpet',
+      address_line2: 'Opposite State Bank',
+      landmark: 'SBI Governorpet',
+      city: 'Vijayawada',
+      state: 'Andhra Pradesh',
+      pincode: '520002',
+      country: 'India',
+      address_type: 'OFFICE',
+      is_default: false,
+      source: 'MANUAL',
+      latitude: 16.5175,
+      longitude: 80.6322,
+      normalized_address: 'D.No 29-14-52, Prakasam Road, Governorpet, Opposite State Bank, Vijayawada, Andhra Pradesh 520002',
+    },
+    {
+      id: 'addr-cust2-home',
+      user_id: 'usr-customer-2',
+      recipient_name: 'Ravi Teja Sharma',
+      phone_number: '+919848199883',
+      address_line1: '12-4-88 Brodipet 4th Line',
+      address_line2: 'Near Hindu College Ground',
+      landmark: 'Hindu College Ground',
+      city: 'Guntur',
+      state: 'Andhra Pradesh',
+      pincode: '522002',
+      country: 'India',
+      address_type: 'HOME',
+      is_default: true,
+      source: 'SAVED_ADDRESS',
+      latitude: 16.3067,
+      longitude: 80.4365,
+      normalized_address: '12-4-88 Brodipet 4th Line, Near Hindu College Ground, Guntur, Andhra Pradesh 522002',
+    },
+  ];
+
+  for (const a of addresses) {
+    await db.query(
+      `INSERT INTO addresses (id, user_id, recipient_name, phone_number, address_line1, address_line2, landmark, city, state, pincode, country, address_type, is_default, source, latitude, longitude, normalized_address)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+       ON CONFLICT (id) DO UPDATE SET
+         recipient_name = EXCLUDED.recipient_name,
+         phone_number = EXCLUDED.phone_number,
+         address_line1 = EXCLUDED.address_line1,
+         city = EXCLUDED.city,
+         pincode = EXCLUDED.pincode,
+         latitude = EXCLUDED.latitude,
+         longitude = EXCLUDED.longitude,
+         is_default = EXCLUDED.is_default,
+         normalized_address = EXCLUDED.normalized_address`,
+      [
+        a.id, a.user_id, a.recipient_name, a.phone_number, a.address_line1, a.address_line2,
+        a.landmark, a.city, a.state, a.pincode, a.country, a.address_type, a.is_default,
+        a.source, a.latitude, a.longitude, a.normalized_address
+      ]
+    );
+  }
 
   // 3. Seed Partners
   const partners = [
@@ -88,6 +192,10 @@ export async function seedDatabase(): Promise<void> {
       status: 'VERIFIED',
       commission_rate_percent: 5.5,
       delivery_radius_km: 8.0,
+      service_radius_km: 12.0,
+      latitude: 16.5167,
+      longitude: 80.6333,
+      is_active: true,
       rating: 4.9,
       total_orders_fulfilled: 684,
       city: 'Vijayawada',
@@ -110,6 +218,10 @@ export async function seedDatabase(): Promise<void> {
       status: 'VERIFIED',
       commission_rate_percent: 6.0,
       delivery_radius_km: 10.0,
+      service_radius_km: 15.0,
+      latitude: 16.5200,
+      longitude: 80.6400,
+      is_active: true,
       rating: 4.8,
       total_orders_fulfilled: 412,
       city: 'Vijayawada',
@@ -132,6 +244,10 @@ export async function seedDatabase(): Promise<void> {
       status: 'VERIFIED',
       commission_rate_percent: 3.5,
       delivery_radius_km: 35.0,
+      service_radius_km: 45.0,
+      latitude: 16.5000,
+      longitude: 80.6800,
+      is_active: true,
       rating: 5.0,
       total_orders_fulfilled: 1420,
       city: 'Vijayawada',
@@ -154,6 +270,10 @@ export async function seedDatabase(): Promise<void> {
       status: 'PENDING',
       commission_rate_percent: 6.0,
       delivery_radius_km: 7.0,
+      service_radius_km: 7.0,
+      latitude: 16.4950,
+      longitude: 80.6550,
+      is_active: false,
       rating: 0.0,
       total_orders_fulfilled: 0,
       city: 'Vijayawada',
@@ -161,16 +281,72 @@ export async function seedDatabase(): Promise<void> {
       pincode: '520010',
       address: 'Patamata Main Road, Vijayawada',
     },
+    {
+      id: 'partner-vskp-elec',
+      business_name: 'Vizag Coastal Power & Cables',
+      legal_entity_name: 'Vizag Coastal Electrical Supplies LLP',
+      owner_name: 'Satyanarayana Murthy',
+      type: 'RETAILER',
+      phone: '+91 891 2567890',
+      email: 'vizag.elec@gmail.com',
+      gstin: '37FFFFF1234F1Z9',
+      pan: 'FFFFF1234F',
+      bank_account: '1092837465',
+      bank_ifsc: 'SBIN0000952',
+      status: 'VERIFIED',
+      commission_rate_percent: 5.0,
+      delivery_radius_km: 15.0,
+      service_radius_km: 15.0,
+      latitude: 17.7041,
+      longitude: 83.2977,
+      is_active: true,
+      rating: 4.7,
+      total_orders_fulfilled: 250,
+      city: 'Visakhapatnam',
+      state: 'Andhra Pradesh',
+      pincode: '530001',
+      address: 'Main Road, Jagadamba Centre, Visakhapatnam',
+    },
+    {
+      id: 'partner-inactive-1',
+      business_name: 'Suspended Power Mart',
+      legal_entity_name: 'Suspended Power Mart LLP',
+      owner_name: 'Nagarjuna Rao',
+      type: 'RETAILER',
+      phone: '+91 98489 99999',
+      email: 'inactive@gmail.com',
+      gstin: '37GGGGG9999G1Z1',
+      pan: 'GGGGG9999G',
+      bank_account: '9999888877',
+      bank_ifsc: 'HDFC0000123',
+      status: 'SUSPENDED',
+      commission_rate_percent: 6.0,
+      delivery_radius_km: 10.0,
+      service_radius_km: 10.0,
+      latitude: 16.5100,
+      longitude: 80.6300,
+      is_active: false,
+      rating: 2.1,
+      total_orders_fulfilled: 50,
+      city: 'Vijayawada',
+      state: 'Andhra Pradesh',
+      pincode: '520002',
+      address: 'Governorpet, Vijayawada',
+    },
   ];
 
   for (const p of partners) {
     await db.query(
-      `INSERT INTO partners (id, business_name, legal_entity_name, owner_name, type, phone, email, gstin, pan, bank_account, bank_ifsc, status, commission_rate_percent, delivery_radius_km, rating, total_orders_fulfilled, city, state, pincode, address)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+      `INSERT INTO partners (id, business_name, legal_entity_name, owner_name, type, phone, email, gstin, pan, bank_account, bank_ifsc, status, commission_rate_percent, delivery_radius_km, service_radius_km, latitude, longitude, is_active, rating, total_orders_fulfilled, city, state, pincode, address)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
        ON CONFLICT (id) DO UPDATE SET
          business_name = EXCLUDED.business_name,
          status = EXCLUDED.status,
-         commission_rate_percent = EXCLUDED.commission_rate_percent`,
+         commission_rate_percent = EXCLUDED.commission_rate_percent,
+         service_radius_km = EXCLUDED.service_radius_km,
+         latitude = EXCLUDED.latitude,
+         longitude = EXCLUDED.longitude,
+         is_active = EXCLUDED.is_active`,
       [
         p.id,
         p.business_name,
@@ -186,6 +362,10 @@ export async function seedDatabase(): Promise<void> {
         p.status,
         p.commission_rate_percent,
         p.delivery_radius_km,
+        p.service_radius_km,
+        p.latitude,
+        p.longitude,
+        p.is_active,
         p.rating,
         p.total_orders_fulfilled,
         p.city,
@@ -198,11 +378,15 @@ export async function seedDatabase(): Promise<void> {
 
   // 4. Seed Stores
   await db.query(
-    `INSERT INTO stores (id, partner_id, store_name, address, city, delivery_radius_km, is_accepting_orders, contact_phone)
+    `INSERT INTO stores (id, partner_id, store_name, address, city, delivery_radius_km, service_radius_km, latitude, longitude, is_accepting_orders, is_active, contact_phone)
      VALUES 
-      ('store-vja-1', 'partner-vja-elec-1', 'Vijayawada Electricals & Hardware (Governorpet)', 'Shop 14, Besant Road, Governorpet, Vijayawada', 'Vijayawada', 8.0, TRUE, '+91 98480 12345'),
-      ('store-anchor-1', 'partner-anchor-exclusive', 'Sri Balaji Anchor World (Eluru Rd)', 'Eluru Road, Near Old Bus Stand, Vijayawada', 'Vijayawada', 10.0, TRUE, '+91 94401 55678')
-     ON CONFLICT (id) DO NOTHING`
+      ('store-vja-1', 'partner-vja-elec-1', 'Vijayawada Electricals & Hardware (Governorpet)', 'Shop 14, Besant Road, Governorpet, Vijayawada', 'Vijayawada', 8.0, 8.0, 16.5167, 80.6333, TRUE, TRUE, '+91 98480 12345'),
+      ('store-anchor-1', 'partner-anchor-exclusive', 'Sri Balaji Anchor World (Eluru Rd)', 'Eluru Road, Near Old Bus Stand, Vijayawada', 'Vijayawada', 10.0, 10.0, 16.5200, 80.6400, TRUE, TRUE, '+91 94401 55678')
+     ON CONFLICT (id) DO UPDATE SET
+       service_radius_km = EXCLUDED.service_radius_km,
+       latitude = EXCLUDED.latitude,
+       longitude = EXCLUDED.longitude,
+       is_active = EXCLUDED.is_active`
   );
 
   // 5. Seed Warehouses
@@ -213,7 +397,10 @@ export async function seedDatabase(): Promise<void> {
       warehouse_name: 'Vijayawada Central Logistics Hub (Hub 1)',
       city: 'Vijayawada',
       state: 'Andhra Pradesh',
+      pincode: '520007',
       address: 'Plot 48, Auto Nagar Phase 2, Vijayawada - 520007',
+      latitude: 16.5000,
+      longitude: 80.6800,
       capacity_sq_ft: 35000,
       total_skus: 840,
       total_inventory_units: 46200,
@@ -221,6 +408,8 @@ export async function seedDatabase(): Promise<void> {
       out_of_stock_count: 2,
       reserved_stock_units: 3100,
       incoming_stock_units: 8500,
+      service_radius_km: 50.0,
+      is_active: true,
     },
     {
       id: 'wh-hyd-sanathnagar',
@@ -228,7 +417,10 @@ export async function seedDatabase(): Promise<void> {
       warehouse_name: 'Hyderabad Regional Depot (Hub 2)',
       city: 'Hyderabad',
       state: 'Telangana',
+      pincode: '500018',
       address: 'Industrial Estate, Sanathnagar, Hyderabad - 500018',
+      latitude: 17.4560,
+      longitude: 78.4410,
       capacity_sq_ft: 60000,
       total_skus: 1250,
       total_inventory_units: 98000,
@@ -236,6 +428,8 @@ export async function seedDatabase(): Promise<void> {
       out_of_stock_count: 5,
       reserved_stock_units: 7400,
       incoming_stock_units: 16000,
+      service_radius_km: 40.0,
+      is_active: true,
     },
     {
       id: 'wh-vskp-gajuwaka',
@@ -243,7 +437,10 @@ export async function seedDatabase(): Promise<void> {
       warehouse_name: 'Visakhapatnam Coastal Logistics Depot (Hub 3)',
       city: 'Visakhapatnam',
       state: 'Andhra Pradesh',
+      pincode: '530012',
       address: 'BHPV Post, Gajuwaka, Visakhapatnam - 530012',
+      latitude: 17.6900,
+      longitude: 83.2100,
       capacity_sq_ft: 28000,
       total_skus: 620,
       total_inventory_units: 31500,
@@ -251,23 +448,53 @@ export async function seedDatabase(): Promise<void> {
       out_of_stock_count: 1,
       reserved_stock_units: 1950,
       incoming_stock_units: 5200,
+      service_radius_km: 40.0,
+      is_active: true,
+    },
+    {
+      id: 'wh-inactive-closed',
+      partner_id: 'dist-abc-vja-hub',
+      warehouse_name: 'Vijayawada Old Satellite Depot (Closed)',
+      city: 'Vijayawada',
+      state: 'Andhra Pradesh',
+      pincode: '520001',
+      address: 'Old Bus Stand Road, Vijayawada',
+      latitude: 16.5100,
+      longitude: 80.6200,
+      capacity_sq_ft: 5000,
+      total_skus: 0,
+      total_inventory_units: 0,
+      low_stock_count: 0,
+      out_of_stock_count: 0,
+      reserved_stock_units: 0,
+      incoming_stock_units: 0,
+      service_radius_km: 10.0,
+      is_active: false,
     },
   ];
 
   for (const wh of warehouses) {
     await db.query(
-      `INSERT INTO warehouses (id, partner_id, warehouse_name, city, state, address, capacity_sq_ft, total_skus, total_inventory_units, low_stock_count, out_of_stock_count, reserved_stock_units, incoming_stock_units)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      `INSERT INTO warehouses (id, partner_id, warehouse_name, city, state, pincode, address, latitude, longitude, capacity_sq_ft, total_skus, total_inventory_units, low_stock_count, out_of_stock_count, reserved_stock_units, incoming_stock_units, service_radius_km, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
        ON CONFLICT (id) DO UPDATE SET
          total_inventory_units = EXCLUDED.total_inventory_units,
-         incoming_stock_units = EXCLUDED.incoming_stock_units`,
+         incoming_stock_units = EXCLUDED.incoming_stock_units,
+         service_radius_km = EXCLUDED.service_radius_km,
+         latitude = EXCLUDED.latitude,
+         longitude = EXCLUDED.longitude,
+         is_active = EXCLUDED.is_active,
+         pincode = EXCLUDED.pincode`,
       [
         wh.id,
         wh.partner_id,
         wh.warehouse_name,
         wh.city,
         wh.state,
+        wh.pincode,
         wh.address,
+        wh.latitude,
+        wh.longitude,
         wh.capacity_sq_ft,
         wh.total_skus,
         wh.total_inventory_units,
@@ -275,6 +502,8 @@ export async function seedDatabase(): Promise<void> {
         wh.out_of_stock_count,
         wh.reserved_stock_units,
         wh.incoming_stock_units,
+        wh.service_radius_km,
+        wh.is_active,
       ]
     );
   }
@@ -618,6 +847,54 @@ export async function seedDatabase(): Promise<void> {
       low_stock_threshold: 10,
       purchase_cost_inr: 6600.0,
       selling_price_inr: 7350.0,
+    },
+    {
+      id: 'inv-hub-pol-25',
+      partner_id: 'dist-abc-vja-hub',
+      sku_id: 'prod-pol-25-red',
+      sku_code: 'POL-WX-25-RED-90M',
+      in_stock_quantity: 55,
+      reserved_quantity: 5,
+      available_quantity: 50,
+      low_stock_threshold: 10,
+      purchase_cost_inr: 2700.0,
+      selling_price_inr: 3100.0,
+    },
+    {
+      id: 'inv-hub-anc-6m',
+      partner_id: 'dist-abc-vja-hub',
+      sku_id: 'prod-anc-rom-6m-plt',
+      sku_code: 'ANC-ROM-6M-PLT-WHT',
+      in_stock_quantity: 110,
+      reserved_quantity: 10,
+      available_quantity: 100,
+      low_stock_threshold: 15,
+      purchase_cost_inr: 150.0,
+      selling_price_inr: 185.0,
+    },
+    {
+      id: 'inv-vskp-pol-25',
+      partner_id: 'partner-vskp-elec',
+      sku_id: 'prod-pol-25-red',
+      sku_code: 'POL-WX-25-RED-90M',
+      in_stock_quantity: 100,
+      reserved_quantity: 0,
+      available_quantity: 100,
+      low_stock_threshold: 10,
+      purchase_cost_inr: 2700.0,
+      selling_price_inr: 3100.0,
+    },
+    {
+      id: 'inv-inactive-pol-25',
+      partner_id: 'partner-inactive-1',
+      sku_id: 'prod-pol-25-red',
+      sku_code: 'POL-WX-25-RED-90M',
+      in_stock_quantity: 100,
+      reserved_quantity: 0,
+      available_quantity: 100,
+      low_stock_threshold: 10,
+      purchase_cost_inr: 2700.0,
+      selling_price_inr: 3100.0,
     },
   ];
 

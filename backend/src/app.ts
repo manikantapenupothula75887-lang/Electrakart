@@ -20,6 +20,9 @@ import { warehouseRoutes } from './modules/warehouses/warehouseRoutes.js';
 import { notificationRoutes } from './modules/notifications/notificationRoutes.js';
 import { adminRoutes } from './modules/admin/adminRoutes.js';
 import { paymentRoutes } from './modules/payments/payment.routes.js';
+import { customerAddressRoutes } from './modules/location/customerAddressRoutes.js';
+import { locationRoutes } from './modules/location/locationRoutes.js';
+import { fulfillmentRoutes } from './modules/fulfillment/fulfillmentRoutes.js';
 
 export function buildApp(): FastifyInstance {
   const app = Fastify({
@@ -141,6 +144,9 @@ export function buildApp(): FastifyInstance {
       v1.register(notificationRoutes);
       v1.register(adminRoutes);
       v1.register(paymentRoutes);
+      v1.register(customerAddressRoutes);
+      v1.register(locationRoutes);
+      v1.register(fulfillmentRoutes);
     },
     { prefix: '/api/v1' }
   );

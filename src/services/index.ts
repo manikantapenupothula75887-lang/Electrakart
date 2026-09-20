@@ -43,6 +43,8 @@ export * from './production/prodOrderService';
 export * from './production/prodPartnerService';
 export * from './production/prodWarehouseService';
 export * from './production/prodNotificationService';
+export * from './production/prodAddressService';
+export * from './production/prodFulfillmentService';
 
 import { prodAuthService } from './production/prodAuthService';
 import { prodProductService } from './production/prodProductService';
@@ -55,6 +57,8 @@ import { prodOrderService } from './production/prodOrderService';
 import { prodPartnerService } from './production/prodPartnerService';
 import { prodWarehouseService } from './production/prodWarehouseService';
 import { prodNotificationService } from './production/prodNotificationService';
+import { prodAddressService } from './production/prodAddressService';
+import { prodFulfillmentService } from './production/prodFulfillmentService';
 
 import { authService as demoAuthService } from './authService';
 import { productService as demoProductService } from './productService';
@@ -82,6 +86,8 @@ export const orderService = prodOrderService;
 export const partnerService = prodPartnerService;
 export const warehouseService = prodWarehouseService;
 export const notificationService = prodNotificationService;
+export const addressService = prodAddressService;
+export const fulfillmentService = prodFulfillmentService;
 
 export const services = {
   auth: prodAuthService,
@@ -95,6 +101,8 @@ export const services = {
   partner: prodPartnerService,
   warehouse: prodWarehouseService,
   notification: prodNotificationService,
+  address: prodAddressService,
+  fulfillment: prodFulfillmentService,
 };
 
 export const demoServices = {

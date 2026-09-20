@@ -44,6 +44,9 @@ export interface Config {
   awsTextractRegion: string;
   awsTextractAccessKeyId: string;
   awsTextractSecretAccessKey: string;
+  mapsProvider: 'mock' | 'google_maps' | 'mapbox';
+  googleMapsApiKey: string;
+  mapboxAccessToken: string;
 }
 
 const INSECURE_DEV_SECRETS = [
@@ -146,6 +149,32 @@ export function getValidatedConfig(customEnv?: NodeJS.ProcessEnv): Config {
     );
   }
 
+  const mapsProvider = (env.MAPS_PROVIDER || (isProd ? 'google_maps' : 'mock')).toLowerCase() as
+    | 'mock'
+    | 'google_maps'
+    | 'mapbox';
+
+  if (isProd && (mapsProvider === 'mock' || env.MAPS_PROVIDER === 'mock')) {
+    throw new Error(
+      '[Config Error] In production, MAPS_PROVIDER cannot be "mock". A real maps/distance provider (e.g. google_maps or mapbox) must be configured. Startup aborted.'
+    );
+  }
+
+  const googleMapsApiKey = env.GOOGLE_MAPS_API_KEY || '';
+  const mapboxAccessToken = env.MAPBOX_ACCESS_TOKEN || '';
+
+  if (isProd && mapsProvider === 'google_maps' && !googleMapsApiKey) {
+    throw new Error(
+      '[Config Error] In production with MAPS_PROVIDER=google_maps, GOOGLE_MAPS_API_KEY must be set. Startup aborted.'
+    );
+  }
+
+  if (isProd && mapsProvider === 'mapbox' && !mapboxAccessToken) {
+    throw new Error(
+      '[Config Error] In production with MAPS_PROVIDER=mapbox, MAPBOX_ACCESS_TOKEN must be set. Startup aborted.'
+    );
+  }
+
   return {
     nodeEnv: currentEnv,
     isProduction: isProd,
@@ -177,6 +206,9 @@ export function getValidatedConfig(customEnv?: NodeJS.ProcessEnv): Config {
     awsTextractRegion,
     awsTextractAccessKeyId,
     awsTextractSecretAccessKey,
+    mapsProvider,
+    googleMapsApiKey,
+    mapboxAccessToken,
   };
 }
 

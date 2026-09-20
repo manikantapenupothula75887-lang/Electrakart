@@ -49,7 +49,7 @@ export async function quotationRoutes(fastify: FastifyInstance) {
       const gstAmount = Math.round(totalAmount * 0.18);
 
       computedItems.push({
-        id: `q-item-${computedItems.length + 1}`,
+        id: `${quoId}-item-${computedItems.length + 1}`,
         skuId: skuRes.rows[0]?.id || it.sku,
         sku: it.sku,
         name: skuRes.rows[0]?.name || it.name || it.sku,

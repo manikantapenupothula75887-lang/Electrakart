@@ -36,6 +36,8 @@ import {
   partnerService,
   warehouseService,
   notificationService,
+  addressService,
+  fulfillmentService,
   checkBackendHealth,
 } from '../services';
 
@@ -131,6 +133,8 @@ interface StoreContextType {
     partner: typeof partnerService;
     warehouse: typeof warehouseService;
     notification: typeof notificationService;
+    address: typeof addressService;
+    fulfillment: typeof fulfillmentService;
   };
 }
 
@@ -1178,6 +1182,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           partner: partnerService,
           warehouse: warehouseService,
           notification: notificationService,
+          address: addressService,
+          fulfillment: fulfillmentService,
         },
       }}
     >

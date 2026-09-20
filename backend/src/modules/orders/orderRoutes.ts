@@ -3,6 +3,8 @@ import { db } from '../../db/connection.js';
 import { optionalAuthenticate, authenticate } from '../../middleware/auth.js';
 import { checkIdempotency, recordIdempotency } from '../../middleware/idempotency.js';
 import { paymentService } from '../payments/payment.service.js';
+import { fulfillmentSelectionService } from '../fulfillment/fulfillment-selection.service.js';
+import { FulfillmentCartItem } from '../fulfillment/fulfillment.types.js';
 
 export async function orderRoutes(fastify: FastifyInstance) {
   // Create unified order with multi-store split fulfillment
@@ -21,6 +23,9 @@ export async function orderRoutes(fastify: FastifyInstance) {
       deliveryMethod = 'EXPRESS',
       paymentMethod = 'UPI',
       cart = [],
+      addressId,
+      latitude,
+      longitude,
     } = (request.body as any) || {};
 
     // 2. Validate input parameters
@@ -71,82 +76,62 @@ export async function orderRoutes(fastify: FastifyInstance) {
       });
     }
 
+    // 3. Authoritative fulfillment planning
+    const fulfillmentCartItems: FulfillmentCartItem[] = cart.map((i: any) => ({
+      sku_code: i.product?.sku || i.sku || i.sku_code,
+      quantity: i.quantity || 1,
+      preferred_partner_id: i.selectedStore?.partnerId || i.partnerId,
+    }));
+
+    const clientPartnerHint =
+      cart[0]?.selectedStore?.partnerId || cart[0]?.partnerId || (request.body as any)?.partnerId;
+
+    let plan;
+    try {
+      plan = await fulfillmentSelectionService.computeFulfillmentPlan({
+        items: fulfillmentCartItems,
+        location: {
+          addressId,
+          latitude: latitude !== undefined ? Number(latitude) : undefined,
+          longitude: longitude !== undefined ? Number(longitude) : undefined,
+          city,
+          pincode,
+        },
+        userId: request.user?.id,
+        clientPartnerHint,
+      });
+    } catch (planErr: any) {
+      const statusCode = planErr.statusCode || 400;
+      return reply.status(statusCode).send({
+        type: 'https://api.electrakart.com/errors/fulfillment-error',
+        title: 'Fulfillment Error',
+        status: statusCode,
+        detail: planErr.message || 'Could not resolve delivery location or fulfillment.',
+        instance: request.url,
+      });
+    }
+
+    if (!plan.is_fulfillable) {
+      return reply.status(409).send({
+        type: 'https://api.electrakart.com/errors/unserviceable',
+        title: 'Order Cannot Be Fulfilled',
+        status: 409,
+        detail: 'One or more items cannot be fulfilled for the selected delivery location.',
+        instance: request.url,
+        unfulfillable_items: plan.unfulfillable_items,
+      });
+    }
+
     const orderId = `ord-${Date.now()}`;
     const orderNumber = `EK-${Math.floor(10000 + Math.random() * 90000)}`;
 
     try {
       const createdOrder = await db.withTransaction(async (tx) => {
         let subtotal = 0;
-
-        // Group items by partner
-        const partnerGroups = new Map<string, any[]>();
-
-        for (const item of cart) {
-          const skuCode = item.product?.sku || item.sku;
-          const qty = item.quantity || 1;
-          const partnerId = item.selectedStore?.partnerId || 'partner-vja-elec-1';
-
-          if (!skuCode || qty <= 0) {
-            throw new Error(`Invalid item in cart: SKU '${skuCode}', quantity ${qty}`);
+        for (const group of plan.groups) {
+          for (const item of group.items) {
+            subtotal += item.subtotal;
           }
-
-          // Step 1: Validate & Lock inventory row in PostgreSQL
-          const invRes = await tx.query(
-            'SELECT id, in_stock_quantity, reserved_quantity, available_quantity, selling_price_inr FROM partner_inventories WHERE partner_id = $1 AND sku_code = $2 FOR UPDATE',
-            [partnerId, skuCode]
-          );
-
-          if (invRes.rows.length === 0) {
-            throw new Error(`SKU '${skuCode}' is not stocked by store '${partnerId}'`);
-          }
-
-          const inv = invRes.rows[0];
-          const availableStock = inv.in_stock_quantity - inv.reserved_quantity;
-
-          if (availableStock < qty) {
-            throw new Error(
-              `Insufficient stock for '${skuCode}' at store '${partnerId}'. Requested: ${qty}, Available: ${availableStock}`
-            );
-          }
-
-          // Step 2: Atomically reserve stock
-          const newReserved = inv.reserved_quantity + qty;
-          const newAvailable = inv.in_stock_quantity - newReserved;
-
-          await tx.query(
-            `UPDATE partner_inventories 
-             SET reserved_quantity = $1, available_quantity = $2, last_updated = NOW() 
-             WHERE id = $3`,
-            [newReserved, newAvailable, inv.id]
-          );
-
-          // Step 3: Record inventory reservation transaction
-          await tx.query(
-            `INSERT INTO inventory_transactions (id, inventory_id, partner_id, sku_code, transaction_type, quantity_change, previous_quantity, new_quantity, reference_id, notes)
-             VALUES ($1, $2, $3, $4, 'RESERVATION_ORDER', $5, $6, $7, $8, $9)`,
-            [
-              `tx-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-              inv.id,
-              partnerId,
-              skuCode,
-              -qty,
-              inv.available_quantity,
-              newAvailable,
-              orderId,
-              `Reserved for order ${orderNumber}`,
-            ]
-          );
-
-          // Group by partner for split fulfillments
-          if (!partnerGroups.has(partnerId)) {
-            partnerGroups.set(partnerId, []);
-          }
-          partnerGroups.get(partnerId)!.push({
-            ...item,
-            resolvedSellingPrice: parseFloat(inv.selling_price_inr),
-          });
-
-          subtotal += parseFloat(inv.selling_price_inr) * qty;
         }
 
         const discount = subtotal > 10000 ? 500 : 0;
@@ -154,8 +139,10 @@ export async function orderRoutes(fastify: FastifyInstance) {
         const gstTotal = Math.round((subtotal - discount) * 0.18);
         const grandTotal = subtotal - discount + gstTotal + deliveryFee;
 
-        // Step 3: Insert Master Order
+        // Step 1: Insert Master Order FIRST
         const customerId = request.user?.id || 'usr-customer-1';
+        const finalDeliveryAddress = plan.delivery_location.normalized_address || deliveryAddress;
+
         await tx.query(
           `INSERT INTO orders (
             id, order_number, customer_id, customer_name, customer_phone,
@@ -169,9 +156,9 @@ export async function orderRoutes(fastify: FastifyInstance) {
             customerId,
             customerName,
             customerPhone,
-            deliveryAddress,
-            city,
-            pincode,
+            finalDeliveryAddress,
+            plan.delivery_location.city || city,
+            plan.delivery_location.pincode || pincode,
             deliveryMethod,
             paymentMethod,
             subtotal,
@@ -182,22 +169,31 @@ export async function orderRoutes(fastify: FastifyInstance) {
           ]
         );
 
-        // Step 4: Create Split Fulfillments for each partner node
+        // Step 2: Create Split Fulfillments for each partner node
         const fulfillments: any[] = [];
         let fulIndex = 1;
 
-        for (const [pId, pItems] of partnerGroups.entries()) {
+        for (const group of plan.groups) {
           const fulId = `ful-${orderId}-${fulIndex}`;
+          const partnerId = group.partner_id;
 
           // Lookup partner details
-          const pRes = await tx.query('SELECT business_name, type FROM partners WHERE id = $1', [pId]);
-          const partner = pRes.rows[0] || { business_name: 'Vijayawada Electricals', type: 'RETAILER' };
-          const addrRes = await tx.query('SELECT address, city FROM partners WHERE id = $1 LIMIT 1', [pId]);
-          const partnerAddr = addrRes.rows[0] ? `${addrRes.rows[0].address}, ${addrRes.rows[0].city}` : 'Besant Road, Governorpet, Vijayawada';
+          const pRes = await tx.query('SELECT business_name, type FROM partners WHERE id = $1', [partnerId]);
+          const partner = pRes.rows[0] || { business_name: group.partner_name, type: group.partner_type };
+          const addrRes = await tx.query('SELECT address, city FROM partners WHERE id = $1 LIMIT 1', [partnerId]);
+          const partnerAddr = addrRes.rows[0]
+            ? `${addrRes.rows[0].address}, ${addrRes.rows[0].city}`
+            : 'Governorpet, Vijayawada';
 
-          const eta = fulIndex === 1 ? '30–45 mins' : '45–60 mins';
+          const eta =
+            group.estimated_delivery_hours <= 2
+              ? '30–45 mins'
+              : group.estimated_delivery_hours <= 4
+              ? '1–2 hours'
+              : 'Next Day (24 hrs)';
           const otp = `${Math.floor(1000 + Math.random() * 9000)}`;
 
+          // Insert fulfillment parent record
           await tx.query(
             `INSERT INTO order_fulfillments (
               id, order_id, fulfillment_index, partner_id, partner_name,
@@ -209,7 +205,7 @@ export async function orderRoutes(fastify: FastifyInstance) {
               fulId,
               orderId,
               fulIndex,
-              pId,
+              partnerId,
               partner.business_name,
               partner.type,
               partnerAddr,
@@ -220,23 +216,80 @@ export async function orderRoutes(fastify: FastifyInstance) {
             ]
           );
 
-          // Insert fulfillment items
+          // Step 3: Reserve stock and insert fulfillment items
           const savedItems: any[] = [];
-          for (const it of pItems) {
-            const fitId = `fit-${fulId}-${savedItems.length + 1}`;
-            const skuCode = it.product?.sku || it.sku;
-            const name = it.product?.name || skuCode;
-            const brand = it.product?.brand || 'Polycab';
-            const series = it.product?.series || 'Standard';
-            const unit = it.product?.unit || 'Nos';
-            const qty = it.quantity || 1;
-            const unitPrice = it.resolvedSellingPrice;
+
+          for (const item of group.items) {
+            const skuCode = item.sku_code;
+            const qty = item.quantity;
+
+            if (!skuCode || qty <= 0) {
+              throw new Error(`Invalid item in cart: SKU '${skuCode}', quantity ${qty}`);
+            }
+
+            // Validate & Lock inventory row in PostgreSQL
+            const invRes = await tx.query(
+              'SELECT id, in_stock_quantity, reserved_quantity, available_quantity, selling_price_inr FROM partner_inventories WHERE partner_id = $1 AND sku_code = $2 FOR UPDATE',
+              [partnerId, skuCode]
+            );
+
+            if (invRes.rows.length === 0) {
+              throw new Error(`SKU '${skuCode}' is not stocked by partner '${partnerId}'`);
+            }
+
+            const inv = invRes.rows[0];
+            const availableStock = inv.in_stock_quantity - inv.reserved_quantity;
+
+            if (availableStock < qty) {
+              throw new Error(
+                `Insufficient stock for '${skuCode}' at partner '${partnerId}'. Requested: ${qty}, Available: ${availableStock}`
+              );
+            }
+
+            // Atomically reserve stock
+            const newReserved = inv.reserved_quantity + qty;
+            const newAvailable = inv.in_stock_quantity - newReserved;
+
+            await tx.query(
+              `UPDATE partner_inventories 
+               SET reserved_quantity = $1, available_quantity = $2, last_updated = NOW() 
+               WHERE id = $3`,
+              [newReserved, newAvailable, inv.id]
+            );
+
+            // Record inventory reservation transaction
+            await tx.query(
+              `INSERT INTO inventory_transactions (id, inventory_id, partner_id, sku_code, transaction_type, quantity_change, previous_quantity, new_quantity, reference_id, notes)
+               VALUES ($1, $2, $3, $4, 'RESERVATION_ORDER', $5, $6, $7, $8, $9)`,
+              [
+                `tx-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+                inv.id,
+                partnerId,
+                skuCode,
+                -qty,
+                inv.available_quantity,
+                newAvailable,
+                orderId,
+                `Reserved for order ${orderNumber}`,
+              ]
+            );
+
+            const unitPrice = parseFloat(inv.selling_price_inr);
             const lineTotal = Math.round(unitPrice * qty * 100) / 100;
 
             // Resolve sku_id foreign key from skus table
-            const skuLookup = await tx.query('SELECT id FROM skus WHERE sku_code = $1 OR id = $1', [skuCode]);
-            const skuId = skuLookup.rows[0]?.id || skuCode;
+            const skuLookup = await tx.query(
+              'SELECT id, name, unit_of_measure FROM skus WHERE sku_code = $1 OR id = $1',
+              [skuCode]
+            );
+            const skuRow = skuLookup.rows[0];
+            const skuId = skuRow?.id || skuCode;
+            const name = item.item_name || skuRow?.name || skuCode;
+            const brand = 'Polycab';
+            const series = 'Standard';
+            const unit = skuRow?.unit_of_measure || 'Nos';
 
+            const fitId = `fit-${fulId}-${savedItems.length + 1}`;
             await tx.query(
               `INSERT INTO fulfillment_items (id, fulfillment_id, sku_id, sku_code, product_name, brand, series, quantity, unit_price_inr, line_total_inr, unit)
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
@@ -273,7 +326,7 @@ export async function orderRoutes(fastify: FastifyInstance) {
           fulfillments.push({
             id: fulId,
             fulfillmentIndex: fulIndex,
-            partnerId: pId,
+            partnerId,
             partnerName: partner.business_name,
             partnerType: partner.type,
             partnerAddress: partnerAddr,
@@ -286,7 +339,12 @@ export async function orderRoutes(fastify: FastifyInstance) {
             items: savedItems,
             trackingHistory: [
               { status: 'PLACED', timestamp: nowStr, title: 'Order Placed', description: `Paid via ${paymentMethod}` },
-              { status: 'CONFIRMED', timestamp: nowStr, title: 'Store Assigned', description: `Allocated to ${partner.business_name}` },
+              {
+                status: 'CONFIRMED',
+                timestamp: nowStr,
+                title: 'Store Assigned',
+                description: `Allocated to ${partner.business_name}`,
+              },
             ],
           });
 

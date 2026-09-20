@@ -24,6 +24,7 @@ CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone_number);
 
 CREATE TABLE IF NOT EXISTS addresses (
     id TEXT PRIMARY KEY,
+    user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
     recipient_name VARCHAR(150) NOT NULL,
     phone_number VARCHAR(20) NOT NULL,
     address_line1 VARCHAR(255) NOT NULL,
@@ -32,12 +33,20 @@ CREATE TABLE IF NOT EXISTS addresses (
     city VARCHAR(100) NOT NULL,
     state VARCHAR(100) NOT NULL,
     pincode VARCHAR(10) NOT NULL,
+    country VARCHAR(50) DEFAULT 'India',
+    address_type VARCHAR(20) DEFAULT 'HOME' CHECK (address_type IN ('HOME', 'OFFICE', 'OTHER')),
+    is_default BOOLEAN DEFAULT FALSE,
+    source VARCHAR(30) DEFAULT 'MANUAL' CHECK (source IN ('GPS', 'MANUAL', 'SAVED_ADDRESS', 'CHECKOUT_ADDRESS')),
     latitude NUMERIC(10, 7),
     longitude NUMERIC(10, 7),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    normalized_address TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+CREATE INDEX IF NOT EXISTS idx_addresses_user_id ON addresses(user_id);
 CREATE INDEX IF NOT EXISTS idx_addresses_pincode ON addresses(pincode);
 CREATE INDEX IF NOT EXISTS idx_addresses_city ON addresses(city);
+CREATE INDEX IF NOT EXISTS idx_addresses_coords ON addresses(latitude, longitude);
 
 CREATE TABLE IF NOT EXISTS customers (
     user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -63,6 +72,10 @@ CREATE TABLE IF NOT EXISTS partners (
     status VARCHAR(50) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'UNDER_REVIEW', 'VERIFIED', 'REJECTED', 'SUSPENDED')),
     commission_rate_percent NUMERIC(5, 2) NOT NULL DEFAULT 5.50,
     delivery_radius_km NUMERIC(5, 2) NOT NULL DEFAULT 10.00,
+    service_radius_km NUMERIC(5, 2) NOT NULL DEFAULT 10.00,
+    latitude NUMERIC(10, 7),
+    longitude NUMERIC(10, 7),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
     rating NUMERIC(3, 2) NOT NULL DEFAULT 0.00,
     total_orders_fulfilled INT NOT NULL DEFAULT 0,
     city VARCHAR(100) NOT NULL,
@@ -77,6 +90,7 @@ CREATE TABLE IF NOT EXISTS partners (
 CREATE INDEX IF NOT EXISTS idx_partners_status ON partners(status);
 CREATE INDEX IF NOT EXISTS idx_partners_type ON partners(type);
 CREATE INDEX IF NOT EXISTS idx_partners_city ON partners(city);
+CREATE INDEX IF NOT EXISTS idx_partners_coords ON partners(latitude, longitude);
 
 CREATE TABLE IF NOT EXISTS stores (
     id TEXT PRIMARY KEY,
@@ -85,12 +99,17 @@ CREATE TABLE IF NOT EXISTS stores (
     address TEXT NOT NULL,
     city VARCHAR(100) NOT NULL,
     delivery_radius_km NUMERIC(5, 2) NOT NULL DEFAULT 8.00,
+    service_radius_km NUMERIC(5, 2) NOT NULL DEFAULT 8.00,
+    latitude NUMERIC(10, 7),
+    longitude NUMERIC(10, 7),
     is_accepting_orders BOOLEAN NOT NULL DEFAULT TRUE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
     contact_phone VARCHAR(20) NOT NULL,
     operating_hours VARCHAR(100) DEFAULT '09:00 AM - 09:00 PM',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_stores_partner ON stores(partner_id);
+CREATE INDEX IF NOT EXISTS idx_stores_coords ON stores(latitude, longitude);
 
 CREATE TABLE IF NOT EXISTS warehouses (
     id TEXT PRIMARY KEY,
@@ -98,7 +117,10 @@ CREATE TABLE IF NOT EXISTS warehouses (
     warehouse_name VARCHAR(200) NOT NULL,
     city VARCHAR(100) NOT NULL,
     state VARCHAR(100) NOT NULL,
+    pincode VARCHAR(10),
     address TEXT NOT NULL,
+    latitude NUMERIC(10, 7),
+    longitude NUMERIC(10, 7),
     capacity_sq_ft INT NOT NULL DEFAULT 25000,
     total_skus INT NOT NULL DEFAULT 0,
     total_inventory_units INT NOT NULL DEFAULT 0,
@@ -106,11 +128,13 @@ CREATE TABLE IF NOT EXISTS warehouses (
     out_of_stock_count INT NOT NULL DEFAULT 0,
     reserved_stock_units INT NOT NULL DEFAULT 0,
     incoming_stock_units INT NOT NULL DEFAULT 0,
+    service_radius_km NUMERIC(5, 2) NOT NULL DEFAULT 50.00,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_warehouses_partner ON warehouses(partner_id);
+CREATE INDEX IF NOT EXISTS idx_warehouses_coords ON warehouses(latitude, longitude);
 
 -- ============================================================================
 -- 2. PRODUCT MASTER & CANONICAL CATALOG HIERARCHY

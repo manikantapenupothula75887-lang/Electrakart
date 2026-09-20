@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   MapPin,
@@ -12,8 +12,15 @@ import {
   Zap,
   AlertCircle,
   RefreshCw,
+  Navigation,
+  Crosshair,
+  Check,
+  Building,
+  Home,
+  Briefcase,
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
+import { CustomerAddress, CustomerFulfillmentPlan } from '../../services';
 
 export const CheckoutPage: React.FC = () => {
   const {
@@ -46,6 +53,92 @@ export const CheckoutPage: React.FC = () => {
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [pendingOrderId, setPendingOrderId] = useState<string | null>(null);
   const [simulateFailure, setSimulateFailure] = useState(false);
+
+  // Address & Hyperlocal Fulfillment states
+  const [savedAddresses, setSavedAddresses] = useState<CustomerAddress[]>([]);
+  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
+  const [isResolvingGps, setIsResolvingGps] = useState(false);
+  const [fulfillmentPlan, setFulfillmentPlan] = useState<CustomerFulfillmentPlan | null>(null);
+  const [isComputingPlan, setIsComputingPlan] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    services.address
+      .getAddresses()
+      .then((addrs) => {
+        if (!mounted || !addrs || addrs.length === 0) return;
+        setSavedAddresses(addrs);
+        const def = addrs.find((a) => a.is_default) || addrs[0];
+        if (def) {
+          setSelectedAddressId(def.id);
+          setDeliveryAddress(`${def.street_address}, ${def.landmark ? def.landmark + ', ' : ''}${def.city}`);
+          if (def.recipient_name) setCustomerName(def.recipient_name);
+          if (def.recipient_phone) setCustomerPhone(def.recipient_phone);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (cart.length === 0) return;
+    let active = true;
+    setIsComputingPlan(true);
+
+    const items = cart.map((c) => ({
+      sku_code: c.product.sku,
+      quantity: c.quantity,
+      preferred_partner_id: c.selectedStore?.partnerId,
+    }));
+
+    services.fulfillment
+      .computeFulfillmentPlan({
+        items,
+        location: selectedAddressId ? { addressId: selectedAddressId } : { city: currentCity, pincode },
+        required_delivery_tier: deliveryMethod === 'EXPRESS' ? 'HYPERLOCAL_2HR' : 'SAME_DAY',
+      })
+      .then((plan) => {
+        if (active) setFulfillmentPlan(plan);
+      })
+      .catch((err) => console.warn('Fulfillment planning fallback:', err))
+      .finally(() => {
+        if (active) setIsComputingPlan(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedAddressId, deliveryMethod, cart, currentCity, pincode]);
+
+  const handleDetectLocation = async () => {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser.');
+      return;
+    }
+    setIsResolvingGps(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const resolved = await services.address.resolveLocation({
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+          });
+          setDeliveryAddress(resolved.normalized_address);
+          setSelectedAddressId(null);
+        } catch (err) {
+          console.error('Failed to resolve GPS coordinates:', err);
+        } finally {
+          setIsResolvingGps(false);
+        }
+      },
+      (err) => {
+        console.warn('GPS location permission denied:', err);
+        setIsResolvingGps(false);
+      }
+    );
+  };
 
   if (cart.length === 0) {
     return (
@@ -81,6 +174,7 @@ export const CheckoutPage: React.FC = () => {
         paymentMethod,
         cart,
         partners,
+        addressId: selectedAddressId || undefined,
       });
 
       const orderId = paymentOrder.orderId;
@@ -183,10 +277,63 @@ export const CheckoutPage: React.FC = () => {
         <div className="lg:col-span-7 space-y-6">
           {/* 1. Customer & Address */}
           <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs space-y-4">
-            <h3 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2">
-              <MapPin className="w-4 h-4 text-amber-500" />
-              <span>1. Delivery Destination</span>
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-amber-500" />
+                <span>1. Delivery Destination</span>
+              </h3>
+              <button
+                type="button"
+                onClick={handleDetectLocation}
+                disabled={isResolvingGps}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-600 hover:text-amber-700 transition"
+              >
+                <Crosshair className={`w-3.5 h-3.5 ${isResolvingGps ? 'animate-spin' : ''}`} />
+                <span>{isResolvingGps ? 'Locating...' : 'Use GPS'}</span>
+              </button>
+            </div>
+
+            {savedAddresses.length > 0 && (
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-600 block">Saved Delivery Addresses</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {savedAddresses.map((addr) => {
+                    const isSelected = selectedAddressId === addr.id;
+                    return (
+                      <button
+                        key={addr.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedAddressId(addr.id);
+                          setDeliveryAddress(
+                            `${addr.street_address}, ${addr.landmark ? addr.landmark + ', ' : ''}${addr.city}`
+                          );
+                          if (addr.recipient_name) setCustomerName(addr.recipient_name);
+                          if (addr.recipient_phone) setCustomerPhone(addr.recipient_phone);
+                        }}
+                        className={`p-3 rounded-2xl border text-left transition-all ${
+                          isSelected
+                            ? 'border-amber-500 bg-amber-50/60 ring-2 ring-amber-400/40'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 flex items-center gap-1">
+                            {addr.address_type === 'HOME' && <Home className="w-3 h-3 text-amber-600" />}
+                            {addr.address_type === 'WORK' && <Briefcase className="w-3 h-3 text-blue-600" />}
+                            {addr.address_type === 'PROJECT_SITE' && <Building className="w-3 h-3 text-emerald-600" />}
+                            {addr.address_type}
+                          </span>
+                          {isSelected && <Check className="w-4 h-4 text-amber-600" />}
+                        </div>
+                        <p className="text-xs font-semibold text-slate-800 line-clamp-1">{addr.street_address}</p>
+                        <p className="text-[11px] text-slate-500">{addr.city}, {addr.pincode}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
@@ -219,7 +366,10 @@ export const CheckoutPage: React.FC = () => {
                   rows={2}
                   required
                   value={deliveryAddress}
-                  onChange={(e) => setDeliveryAddress(e.target.value)}
+                  onChange={(e) => {
+                    setDeliveryAddress(e.target.value);
+                    if (selectedAddressId) setSelectedAddressId(null);
+                  }}
                   className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-slate-200 focus:ring-2 focus:ring-amber-500 font-medium"
                 />
                 <span className="text-[11px] text-slate-500 mt-1 block">
@@ -278,10 +428,81 @@ export const CheckoutPage: React.FC = () => {
                 }`}
               >
                 <span className="font-extrabold text-xs text-slate-900 block mb-1">Store Pickup</span>
-                <p className="text-[11px] text-slate-500">Collect ready counter package via OTP</p>
+                <p className="text-[11px] text-slate-500">Ready at counter in 15 mins</p>
               </button>
             </div>
           </div>
+
+          {/* 2b. Authoritative Hyperlocal Dispatch Plan */}
+          {fulfillmentPlan && (
+            <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                  <Store className="w-4 h-4 text-emerald-600" />
+                  <span>
+                    Hyperlocal Dispatch Plan ({fulfillmentPlan.total_packages}{' '}
+                    {fulfillmentPlan.total_packages === 1 ? 'Package' : 'Packages'})
+                  </span>
+                </h3>
+                <span className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                  {fulfillmentPlan.estimated_delivery_text}
+                </span>
+              </div>
+
+              <div className="space-y-3">
+                {fulfillmentPlan.packages.map((pkg) => (
+                  <div
+                    key={pkg.package_number}
+                    className="p-3.5 bg-slate-50 rounded-2xl border border-slate-100 text-xs space-y-2"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                        <Store className="w-3.5 h-3.5 text-slate-500" />
+                        <span>
+                          Package {pkg.package_number}: {pkg.origin_name}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+                        <span>{pkg.distance_km.toFixed(1)} km</span>
+                        <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[10px] font-bold">
+                          {pkg.distance_source === 'ROAD_NETWORK' ? 'Road Network' : 'Geodesic Fallback'}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-slate-600">
+                      Estimated Slot: <strong className="text-slate-800">{pkg.estimated_delivery_slot}</strong>
+                    </div>
+                    <div className="pt-1 flex flex-wrap gap-1.5">
+                      {pkg.items.map((it, idx) => (
+                        <span
+                          key={idx}
+                          className="inline-flex items-center px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700 font-mono text-[10px]"
+                        >
+                          {it.product_name} × {it.quantity}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {fulfillmentPlan.unserviceable_items && fulfillmentPlan.unserviceable_items.length > 0 && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold">Items unserviceable in your area:</span>
+                    <ul className="list-disc pl-4 mt-1">
+                      {fulfillmentPlan.unserviceable_items.map((un, idx) => (
+                        <li key={idx}>
+                          SKU: {un.sku_code} ({un.reason})
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* 3. Payment Gateway Selection */}
           <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs space-y-4">

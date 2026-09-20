@@ -344,7 +344,7 @@ export class EstimateService {
       const gstAmount = Math.round(totalAmount * 0.18);
 
       computedItems.push({
-        id: `q-item-${computedItems.length + 1}`,
+        id: `${quoId}-item-${computedItems.length + 1}`,
         skuId: sku?.id || it.matchedSkuId,
         sku: sku?.sku_code || it.matchedSkuCode,
         name: sku?.name || it.productName,
