@@ -47,6 +47,26 @@ export interface Config {
   mapsProvider: 'mock' | 'google_maps' | 'mapbox';
   googleMapsApiKey: string;
   mapboxAccessToken: string;
+  emailEnabled: boolean;
+  emailProvider: 'mock' | 'resend' | 'sendgrid' | 'smtp';
+  resendApiKey: string;
+  smtpHost: string;
+  smtpPort: number;
+  smtpUser: string;
+  smtpPass: string;
+  emailFrom: string;
+  emailWebhookSecret: string;
+  smsEnabled: boolean;
+  smsProvider: 'mock' | 'twilio' | 'msg91' | 'fast2sms';
+  twilioAccountSid: string;
+  twilioAuthToken: string;
+  twilioFromNumber: string;
+  smsWebhookSecret: string;
+  whatsappEnabled: boolean;
+  whatsappProvider: 'mock' | 'meta_whatsapp' | 'twilio_whatsapp';
+  whatsappApiToken: string;
+  whatsappPhoneNumberId: string;
+  whatsappWebhookSecret: string;
 }
 
 const INSECURE_DEV_SECRETS = [
@@ -175,6 +195,58 @@ export function getValidatedConfig(customEnv?: NodeJS.ProcessEnv): Config {
     );
   }
 
+  const emailEnabled = env.EMAIL_ENABLED === 'true' || env.EMAIL_ENABLED === '1' || (!isProd && env.EMAIL_ENABLED !== 'false');
+  const emailProvider = (env.EMAIL_PROVIDER || (isProd ? 'resend' : 'mock')).toLowerCase() as
+    | 'mock'
+    | 'resend'
+    | 'sendgrid'
+    | 'smtp';
+  const resendApiKey = env.RESEND_API_KEY || '';
+  const smtpHost = env.SMTP_HOST || '';
+  const smtpPort = parseInt(env.SMTP_PORT || '587', 10);
+  const smtpUser = env.SMTP_USER || '';
+  const smtpPass = env.SMTP_PASS || '';
+  const emailFrom = env.EMAIL_FROM || 'ElectraKart Alerts <alerts@electrakart.com>';
+  const emailWebhookSecret = env.EMAIL_WEBHOOK_SECRET || (isTest ? 'test-email-webhook-secret' : '');
+
+  if (isProd && emailEnabled && (emailProvider === 'mock' || env.EMAIL_PROVIDER === 'mock')) {
+    throw new Error(
+      '[Config Error] In production, EMAIL_PROVIDER cannot be "mock" when email is enabled. A real email provider (e.g. resend, sendgrid, smtp) must be configured. Startup aborted.'
+    );
+  }
+
+  const smsEnabled = env.SMS_ENABLED === 'true' || env.SMS_ENABLED === '1' || (!isProd && env.SMS_ENABLED !== 'false');
+  const smsProvider = (env.SMS_PROVIDER || (isProd ? 'twilio' : 'mock')).toLowerCase() as
+    | 'mock'
+    | 'twilio'
+    | 'msg91'
+    | 'fast2sms';
+  const twilioAccountSid = env.TWILIO_ACCOUNT_SID || '';
+  const twilioAuthToken = env.TWILIO_AUTH_TOKEN || '';
+  const twilioFromNumber = env.TWILIO_FROM_NUMBER || '';
+  const smsWebhookSecret = env.SMS_WEBHOOK_SECRET || (isTest ? 'test-sms-webhook-secret' : '');
+
+  if (isProd && smsEnabled && (smsProvider === 'mock' || env.SMS_PROVIDER === 'mock')) {
+    throw new Error(
+      '[Config Error] In production, SMS_PROVIDER cannot be "mock" when SMS is enabled. A real SMS provider (e.g. twilio, msg91) must be configured. Startup aborted.'
+    );
+  }
+
+  const whatsappEnabled = env.WHATSAPP_ENABLED === 'true' || env.WHATSAPP_ENABLED === '1' || (!isProd && env.WHATSAPP_ENABLED !== 'false');
+  const whatsappProvider = (env.WHATSAPP_PROVIDER || (isProd ? 'meta_whatsapp' : 'mock')).toLowerCase() as
+    | 'mock'
+    | 'meta_whatsapp'
+    | 'twilio_whatsapp';
+  const whatsappApiToken = env.WHATSAPP_API_TOKEN || '';
+  const whatsappPhoneNumberId = env.WHATSAPP_PHONE_NUMBER_ID || '';
+  const whatsappWebhookSecret = env.WHATSAPP_WEBHOOK_SECRET || (isTest ? 'test-whatsapp-webhook-secret' : '');
+
+  if (isProd && whatsappEnabled && (whatsappProvider === 'mock' || env.WHATSAPP_PROVIDER === 'mock')) {
+    throw new Error(
+      '[Config Error] In production, WHATSAPP_PROVIDER cannot be "mock" when WhatsApp is enabled. A real WhatsApp Business provider must be configured. Startup aborted.'
+    );
+  }
+
   return {
     nodeEnv: currentEnv,
     isProduction: isProd,
@@ -209,6 +281,26 @@ export function getValidatedConfig(customEnv?: NodeJS.ProcessEnv): Config {
     mapsProvider,
     googleMapsApiKey,
     mapboxAccessToken,
+    emailEnabled,
+    emailProvider,
+    resendApiKey,
+    smtpHost,
+    smtpPort,
+    smtpUser,
+    smtpPass,
+    emailFrom,
+    emailWebhookSecret,
+    smsEnabled,
+    smsProvider,
+    twilioAccountSid,
+    twilioAuthToken,
+    twilioFromNumber,
+    smsWebhookSecret,
+    whatsappEnabled,
+    whatsappProvider,
+    whatsappApiToken,
+    whatsappPhoneNumberId,
+    whatsappWebhookSecret,
   };
 }
 

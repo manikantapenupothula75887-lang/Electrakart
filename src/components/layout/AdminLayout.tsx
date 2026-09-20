@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { ElectraKartLogo } from '../common/ElectraKartLogo';
 import { DemoRoleSwitcherHUD } from '../common/DemoRoleSwitcherHUD';
+import { NotificationBell } from '../common/NotificationBell';
 import { useStore } from '../../context/StoreContext';
 
 export const AdminLayout: React.FC = () => {
@@ -71,11 +72,12 @@ export const AdminLayout: React.FC = () => {
             </div>
           </div>
 
-          <div className="hidden md:flex items-center gap-2 text-xs">
-            <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-950/60 border border-emerald-500/30 text-emerald-400 font-semibold">
+          <div className="flex items-center gap-3 text-xs">
+            <span className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-950/60 border border-emerald-500/30 text-emerald-400 font-semibold">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
               Fulfillment Engine Active (9 Cities)
             </span>
+            <NotificationBell role="ADMIN" variant="dark" />
           </div>
         </div>
 

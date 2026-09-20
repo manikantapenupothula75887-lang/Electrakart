@@ -465,16 +465,54 @@ CREATE INDEX IF NOT EXISTS idx_settlements_partner ON settlements(partner_id, st
 
 CREATE TABLE IF NOT EXISTS notifications (
     id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
     role VARCHAR(50) NOT NULL,
     title VARCHAR(150) NOT NULL,
     message TEXT NOT NULL,
     type VARCHAR(50) NOT NULL,
     is_read BOOLEAN NOT NULL DEFAULT FALSE,
     link_action_url TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    entity_type VARCHAR(50),
+    entity_id TEXT,
+    read_at TIMESTAMPTZ,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, is_read, created_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_entity ON notifications(entity_type, entity_id);
+
+CREATE TABLE IF NOT EXISTS notification_logs (
+    id TEXT PRIMARY KEY,
+    notification_id TEXT REFERENCES notifications(id) ON DELETE SET NULL,
+    channel VARCHAR(32) NOT NULL CHECK (channel IN ('IN_APP', 'EMAIL', 'SMS', 'WHATSAPP')),
+    provider VARCHAR(50) NOT NULL,
+    provider_message_id VARCHAR(255),
+    recipient TEXT NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'QUEUED' CHECK (status IN ('QUEUED', 'SENT', 'DELIVERED', 'FAILED', 'READ')),
+    attempt_count INT NOT NULL DEFAULT 1,
+    last_error TEXT,
+    sent_at TIMESTAMPTZ,
+    delivered_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_notification_logs_status ON notification_logs(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_notification_logs_notif_channel ON notification_logs(notification_id, channel);
+CREATE INDEX IF NOT EXISTS idx_notification_logs_provider_msg ON notification_logs(provider, provider_message_id);
+
+CREATE TABLE IF NOT EXISTS notification_preferences (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    channel VARCHAR(32) NOT NULL CHECK (channel IN ('IN_APP', 'EMAIL', 'SMS', 'WHATSAPP')),
+    event_category VARCHAR(50) NOT NULL DEFAULT 'ALL',
+    is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, channel, event_category)
+);
+CREATE INDEX IF NOT EXISTS idx_notification_preferences_user ON notification_preferences(user_id);
 
 CREATE TABLE IF NOT EXISTS chat_sessions (
     id TEXT PRIMARY KEY,

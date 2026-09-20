@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { ElectraKartLogo } from '../common/ElectraKartLogo';
 import { DemoRoleSwitcherHUD } from '../common/DemoRoleSwitcherHUD';
+import { NotificationBell } from '../common/NotificationBell';
 import { useStore } from '../../context/StoreContext';
 
 export const DistributorLayout: React.FC = () => {
@@ -61,11 +62,12 @@ export const DistributorLayout: React.FC = () => {
             </div>
           </div>
 
-          <div className="hidden md:flex items-center gap-3 text-xs">
-            <div className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-right">
+          <div className="flex items-center gap-3 text-xs">
+            <div className="hidden md:block px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-right">
               <span className="text-[10px] text-slate-400 block uppercase">Network Stock</span>
               <span className="font-extrabold text-amber-400 font-mono">{totalUnits.toLocaleString('en-IN')} Units</span>
             </div>
+            <NotificationBell role="DISTRIBUTOR" variant="dark" />
           </div>
         </div>
 

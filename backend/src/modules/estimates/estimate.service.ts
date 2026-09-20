@@ -13,6 +13,7 @@ import {
   ExtractedLineItem,
   EstimateProcessingStatus,
 } from './ocr.types.js';
+import { notificationService } from '../notifications/notification.service.js';
 
 export interface ProcessEstimateInput {
   customerId: string;
@@ -174,18 +175,55 @@ export class EstimateService {
         );
       }
     });
-
-    return {
-      estimateId,
-      status: overallStatus,
-      ocrProvider: ocrResult.provider,
-      totalItemsExtracted: matchedItems.length,
-      unresolvedCount: matchedItems.filter((i) => i.matchStatus !== 'EXACT_MATCH').length,
-      items: matchedItems,
-      city,
-      pincode,
-    };
-  }
+ 
+     // Non-blocking notification event dispatch
+     if (overallStatus === 'NEEDS_CLARIFICATION' || overallStatus === 'PARTIALLY_RESOLVED') {
+       notificationService.publishEvent({
+         eventType: 'ESTIMATE_NEEDS_CLARIFICATION',
+         userId: customerId,
+         role: 'CUSTOMER',
+         title: 'Estimate Needs Clarification',
+         message: `Some items in your estimate ${estimateId} need your confirmation to ensure exact match.`,
+         entityType: 'ESTIMATE',
+         entityId: estimateId,
+         linkActionUrl: `/customer/estimates/${estimateId}`,
+         recipientPhone: customerPhone,
+         metadata: {
+           estimateId,
+           unresolvedCount: matchedItems.filter((i) => i.matchStatus !== 'EXACT_MATCH').length,
+           city,
+         },
+       }).catch((err) => console.error('[EstimateService] Failed to dispatch clarification notification:', err));
+     } else {
+       notificationService.publishEvent({
+         eventType: 'ESTIMATE_PROCESSED',
+         userId: customerId,
+         role: 'CUSTOMER',
+         title: 'Estimate Processed Successfully',
+         message: `Your estimate ${estimateId} has been successfully processed with exact catalog matches.`,
+         entityType: 'ESTIMATE',
+         entityId: estimateId,
+         linkActionUrl: `/customer/estimates/${estimateId}`,
+         recipientPhone: customerPhone,
+         metadata: {
+           estimateId,
+           totalItems: matchedItems.length,
+           city,
+         },
+       }).catch((err) => console.error('[EstimateService] Failed to dispatch processed notification:', err));
+     }
+ 
+     return {
+       estimateId,
+       status: overallStatus,
+       ocrProvider: ocrResult.provider,
+       totalItemsExtracted: matchedItems.length,
+       unresolvedCount: matchedItems.filter((i) => i.matchStatus !== 'EXACT_MATCH').length,
+       items: matchedItems,
+       city,
+       pincode,
+     };
+   }
 
   /**
    * Retrieves an estimate by ID with strict IDOR ownership checks.
@@ -436,9 +474,28 @@ export class EstimateService {
         items: computedItems,
       };
     });
-
-    return quotation;
-  }
+ 
+     // Non-blocking quotation created event dispatch
+     notificationService.publishEvent({
+       eventType: 'QUOTATION_CREATED',
+       userId: estimate.customer_id || customerDetails?.customerId,
+       role: 'CUSTOMER',
+       title: `Quotation Generated: ${quotationNumber}`,
+       message: `Your quotation ${quotationNumber} is ready with 48-hour price lock guarantee. Total: Rs. ${grandTotal.toLocaleString('en-IN')}`,
+       entityType: 'QUOTATION',
+       entityId: quoId,
+       linkActionUrl: `/customer/quotations/${quoId}`,
+       recipientPhone: customerDetails?.customerPhone || estimate.customer_phone,
+       metadata: {
+         quotationId: quoId,
+         quotationNumber,
+         grandTotal,
+         lockedUntil: lockedUntil.toISOString(),
+       },
+     }).catch((err) => console.error('[EstimateService] Failed to dispatch quotation notification:', err));
+ 
+     return quotation;
+   }
 }
 
 export const estimateService = new EstimateService();

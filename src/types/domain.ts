@@ -479,9 +479,13 @@ export interface Notification {
   role: Role;
   title: string;
   message: string;
-  type: 'ORDER_UPDATE' | 'PRICE_ALERT' | 'KYC_STATUS' | 'INVENTORY_LOW' | 'SYSTEM';
+  type: 'ORDER_UPDATE' | 'PRICE_ALERT' | 'KYC_STATUS' | 'INVENTORY_LOW' | 'SYSTEM' | string;
   isRead: boolean;
   linkActionUrl?: string;
+  entityType?: string;
+  entityId?: string;
+  metadata?: Record<string, any>;
+  readAt?: string | null;
   createdAt: string;
 }
 

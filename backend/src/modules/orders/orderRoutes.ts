@@ -5,6 +5,7 @@ import { checkIdempotency, recordIdempotency } from '../../middleware/idempotenc
 import { paymentService } from '../payments/payment.service.js';
 import { fulfillmentSelectionService } from '../fulfillment/fulfillment-selection.service.js';
 import { FulfillmentCartItem } from '../fulfillment/fulfillment.types.js';
+import { notificationService } from '../notifications/notification.service.js';
 
 export async function orderRoutes(fastify: FastifyInstance) {
   // Create unified order with multi-store split fulfillment
@@ -379,6 +380,61 @@ export async function orderRoutes(fastify: FastifyInstance) {
         await recordIdempotency(idempotencyKey, request.user?.id, request.url, request.body, 201, createdOrder);
       }
 
+      // Post-Commit Notification Event Hook
+      const customerUserId = request.user?.id || 'usr-customer-1';
+      notificationService
+        .publishEvent({
+          eventType: 'ORDER_PLACED',
+          userId: customerUserId,
+          role: 'CUSTOMER',
+          title: `Order Placed: ${createdOrder.orderNumber}`,
+          message: `Your order for ${createdOrder.fulfillments.length} package(s) has been placed successfully.`,
+          entityType: 'ORDER',
+          entityId: createdOrder.id,
+          linkActionUrl: `/orders/${createdOrder.id}`,
+          recipientEmail: request.user?.email || 'customer@electrakart.com',
+          recipientPhone: customerPhone,
+          metadata: {
+            orderId: createdOrder.id,
+            orderNumber: createdOrder.orderNumber,
+            customerName,
+            grandTotal: createdOrder.grandTotal,
+            itemCount: createdOrder.fulfillments.reduce((acc: number, f: any) => acc + f.items.length, 0),
+          },
+          isCriticalTransactional: true,
+        })
+        .catch((e) => console.error('[Notification Hook Error] ORDER_PLACED:', e));
+
+      for (const ful of createdOrder.fulfillments) {
+        const isDist = ful.partnerType === 'DISTRIBUTOR' || (ful.partnerId && ful.partnerId.startsWith('dist-'));
+        const partnerRole = isDist ? 'DISTRIBUTOR' : 'RETAILER';
+        let partnerUserId: string | undefined = undefined;
+        if (ful.partnerId === 'dist-abc-vja-hub') {
+          partnerUserId = 'usr-distributor-1';
+        } else if (ful.partnerId === 'partner-vja-elec-1' || ful.partnerId === 'partner-anchor-exclusive') {
+          partnerUserId = 'usr-retailer-1';
+        }
+
+        notificationService
+          .publishEvent({
+            eventType: 'FULFILLMENT_ASSIGNED',
+            userId: partnerUserId,
+            role: partnerRole,
+            title: `New Fulfillment Assigned: ${createdOrder.orderNumber}`,
+            message: `Package allocated for fulfillment. Items: ${ful.items.length}.`,
+            entityType: 'FULFILLMENT',
+            entityId: ful.id,
+            linkActionUrl: isDist ? '/distributor/orders' : '/retailer/orders',
+            metadata: {
+              orderId: createdOrder.id,
+              fulfillmentId: ful.id,
+              partnerId: ful.partnerId,
+              partnerName: ful.partnerName,
+            },
+          })
+          .catch((e) => console.error('[Notification Hook Error] FULFILLMENT_ASSIGNED:', e));
+      }
+
       return reply.status(201).send(createdOrder);
     } catch (err: any) {
       return reply.status(409).send({
@@ -590,7 +646,7 @@ export async function orderRoutes(fastify: FastifyInstance) {
   });
 
   // Update fulfillment lifecycle status (Partner action with ownership checks)
-  fastify.post('/orders/:orderId/fulfillments/:fulfillmentId/status', { preHandler: [optionalAuthenticate] }, async (request, reply) => {
+  const handleFulfillmentStatus = async (request: any, reply: any) => {
     const { orderId, fulfillmentId } = request.params as any;
     const { status, note, driverName, driverPhone } = (request.body as any) || {};
 
@@ -702,13 +758,54 @@ export async function orderRoutes(fastify: FastifyInstance) {
       }
     });
 
+    // Post-Commit Notification Hook
+    const orderDetailsRes = await db.query(
+      'SELECT customer_id, customer_name, customer_phone, order_number FROM orders WHERE id = $1',
+      [orderId]
+    );
+    const ordMeta = orderDetailsRes.rows[0] || {};
+    const fulOtpRes = await db.query('SELECT handover_otp FROM order_fulfillments WHERE id = $1', [fulfillmentId]);
+
+    let eventType: any = 'ORDER_CONFIRMED';
+    if (status === 'PREPARING') eventType = 'FULFILLMENT_PREPARING';
+    else if (status === 'PACKED') eventType = 'FULFILLMENT_PACKED';
+    else if (status === 'DISPATCHED') eventType = 'ORDER_DISPATCHED';
+    else if (status === 'DELIVERED') eventType = 'ORDER_DELIVERED';
+    else if (status === 'CANCELLED') eventType = 'ORDER_CANCELLED';
+
+    notificationService
+      .publishEvent({
+        eventType,
+        userId: ordMeta.customer_id,
+        role: 'CUSTOMER',
+        title: `Order ${ordMeta.order_number}: ${status.replace('_', ' ')}`,
+        message: `Your package fulfillment status has been updated to ${status}.`,
+        entityType: 'ORDER',
+        entityId: orderId,
+        linkActionUrl: `/orders/${orderId}`,
+        recipientPhone: ordMeta.customer_phone,
+        metadata: {
+          orderId,
+          orderNumber: ordMeta.order_number,
+          customerName: ordMeta.customer_name,
+          fulfillmentId,
+          status,
+          otp: fulOtpRes.rows[0]?.handover_otp,
+        },
+        isCriticalTransactional: true,
+      })
+      .catch((e) => console.error('[Notification Hook Error] FULFILLMENT_STATUS:', e));
+
     return reply.send({
       orderId,
       fulfillmentId,
       status,
       updatedAt: new Date().toISOString(),
     });
-  });
+  };
+
+  fastify.post('/orders/:orderId/fulfillments/:fulfillmentId/status', { preHandler: [optionalAuthenticate] }, handleFulfillmentStatus);
+  fastify.patch('/orders/:orderId/fulfillments/:fulfillmentId/status', { preHandler: [optionalAuthenticate] }, handleFulfillmentStatus);
 
   // Cancel entire order & atomically roll back inventory
   fastify.post('/orders/:id/cancel', { preHandler: [optionalAuthenticate] }, async (request, reply) => {
@@ -717,6 +814,23 @@ export async function orderRoutes(fastify: FastifyInstance) {
 
     try {
       const result = await paymentService.cancelOrder(id, request.user, reason);
+
+      // Notification hook for cancelled order
+      notificationService
+        .publishEvent({
+          eventType: 'ORDER_CANCELLED',
+          userId: request.user?.id || 'usr-customer-1',
+          role: 'CUSTOMER',
+          title: `Order Cancelled: ${result.orderNumber || id}`,
+          message: `Your order has been cancelled. Reason: ${reason || 'Customer request'}.`,
+          entityType: 'ORDER',
+          entityId: id,
+          linkActionUrl: `/orders/${id}`,
+          metadata: { orderId: id, orderNumber: result.orderNumber, reason },
+          isCriticalTransactional: true,
+        })
+        .catch((e) => console.error('[Notification Hook Error] ORDER_CANCELLED:', e));
+
       return reply.send(result);
     } catch (err: any) {
       const isForbidden = err.message.includes('Forbidden');

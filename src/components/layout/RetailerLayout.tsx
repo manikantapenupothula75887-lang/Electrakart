@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { ElectraKartLogo } from '../common/ElectraKartLogo';
 import { DemoRoleSwitcherHUD } from '../common/DemoRoleSwitcherHUD';
+import { NotificationBell } from '../common/NotificationBell';
 import { useStore } from '../../context/StoreContext';
 
 export const RetailerLayout: React.FC = () => {
@@ -99,6 +100,9 @@ export const RetailerLayout: React.FC = () => {
               <UploadCloud className="w-3.5 h-3.5" />
               <span>Bulk Stock Upload</span>
             </Link>
+
+            {/* Notification Bell */}
+            <NotificationBell role="RETAILER" variant="dark" />
           </div>
         </div>
 

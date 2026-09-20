@@ -13,7 +13,26 @@ export class ProductionNotificationService implements INotificationService {
     try {
       const qs = role ? `?role=${role}` : '';
       const res = await apiClient.get<any>(`/notifications${qs}`);
-      return res.notifications || [];
+      const list = res.notifications || [];
+      return list.map((n: any) => ({
+        id: n.id,
+        userId: n.userId || 'usr-customer-1',
+        role: (n.role as any) || role || 'CUSTOMER',
+        title: n.title,
+        message: n.message,
+        type: n.type,
+        isRead: Boolean(n.isRead),
+        readAt: n.readAt,
+        entityType: n.entityType,
+        entityId: n.entityId,
+        metadata: n.metadata,
+        linkActionUrl:
+          n.linkActionUrl ||
+          (n.entityType === 'ORDER' ? `/customer/orders` :
+           n.entityType === 'ESTIMATE' ? `/customer/estimate` :
+           n.entityType === 'INVENTORY' ? `/retailer/inventory` : undefined),
+        createdAt: n.createdAt,
+      }));
     } catch {
       if (!role) return INITIAL_NOTIFICATIONS;
       return INITIAL_NOTIFICATIONS.filter((n) => n.role === role);
@@ -24,7 +43,7 @@ export class ProductionNotificationService implements INotificationService {
     try {
       await apiClient.patch(`/notifications/${id}/read`);
     } catch {
-      // Ignore
+      // Resilient ignore
     }
   }
 
@@ -32,7 +51,7 @@ export class ProductionNotificationService implements INotificationService {
     try {
       await apiClient.post('/notifications/read-all', { role });
     } catch {
-      // Ignore
+      // Resilient ignore
     }
   }
 
@@ -49,9 +68,45 @@ export class ProductionNotificationService implements INotificationService {
   }
 
   async getUnreadCount(role?: UserRole): Promise<number> {
+    try {
+      const res = await apiClient.get<{ unreadCount: number }>('/notifications/unread-count');
+      if (typeof res.unreadCount === 'number') {
+        return res.unreadCount;
+      }
+    } catch {
+      // Fallback
+    }
     const notifs = await this.getNotifications(role);
     return notifs.filter((n) => !n.isRead).length;
+  }
+
+  async getPreferences(): Promise<any> {
+    try {
+      const res = await apiClient.get<any>('/notifications/preferences');
+      return res.preferences;
+    } catch {
+      return {
+        emailEnabled: true,
+        smsEnabled: true,
+        whatsappEnabled: true,
+        inAppEnabled: true,
+        orderUpdates: true,
+        promotional: false,
+        lowStockAlerts: true,
+      };
+    }
+  }
+
+  async updatePreferences(preferences: Record<string, boolean>): Promise<any> {
+    try {
+      const res = await apiClient.put<any>('/notifications/preferences', preferences);
+      return res.preferences;
+    } catch (err) {
+      console.warn('Failed to update notification preferences:', err);
+      return preferences;
+    }
   }
 }
 
 export const prodNotificationService = new ProductionNotificationService();
+

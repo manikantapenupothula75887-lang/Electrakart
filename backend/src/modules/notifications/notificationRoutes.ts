@@ -1,37 +1,28 @@
+/**
+ * ElectraKart Notification Routes
+ * Exposes REST endpoints for in-app notifications, unread counts,
+ * channel preferences, retry mechanisms, and delivery status webhooks.
+ */
+
 import { FastifyInstance } from 'fastify';
-import { db } from '../../db/connection.js';
-import { optionalAuthenticate } from '../../middleware/auth.js';
+import { authenticate } from '../../middleware/auth.js';
+import { notificationService } from './notification.service.js';
+import { NotificationChannel } from './notification.types.js';
 
 export async function notificationRoutes(fastify: FastifyInstance) {
-  // Get notifications
-  fastify.get('/notifications', { preHandler: [optionalAuthenticate] }, async (request, reply) => {
-    const { role } = request.query as any;
-    const userRole = role || request.user?.role;
+  // 1. Get In-App Notifications (Strictly scoped to user / tenant role)
+  fastify.get('/notifications', { preHandler: [authenticate] }, async (request, reply) => {
+    const user = request.user as { id: string; role: string };
+    const { limit, offset, unreadOnly, role } = request.query as any;
 
-    let sql = 'SELECT * FROM notifications WHERE 1=1';
-    const params: any[] = [];
+    const notifications = await notificationService.getNotifications(user, {
+      limit: limit ? parseInt(limit, 10) : 50,
+      offset: offset ? parseInt(offset, 10) : 0,
+      unreadOnly: unreadOnly === 'true' || unreadOnly === true,
+      role,
+    });
 
-    if (userRole) {
-      params.push(userRole);
-      sql += ` AND role = $${params.length}`;
-    }
-
-    sql += ' ORDER BY created_at DESC LIMIT 50';
-    const res = await db.query(sql, params);
-
-    const notifications = res.rows.map((n) => ({
-      id: n.id,
-      userId: n.user_id,
-      role: n.role,
-      title: n.title,
-      message: n.message,
-      type: n.type,
-      isRead: n.is_read,
-      linkActionUrl: n.link_action_url,
-      createdAt: n.created_at,
-    }));
-
-    const unreadCount = notifications.filter((n) => !n.isRead).length;
+    const unreadCount = await notificationService.getUnreadCount(user);
 
     return reply.send({
       unreadCount,
@@ -39,21 +30,121 @@ export async function notificationRoutes(fastify: FastifyInstance) {
     });
   });
 
-  // Mark notification as read
-  fastify.patch('/notifications/:id/read', async (request, reply) => {
-    const { id } = request.params as any;
-    await db.query('UPDATE notifications SET is_read = TRUE WHERE id = $1', [id]);
-    return reply.status(204).send();
+  // 2. Fast Unread Count Endpoint
+  fastify.get('/notifications/unread-count', { preHandler: [authenticate] }, async (request, reply) => {
+    const user = request.user as { id: string; role: string };
+    const unreadCount = await notificationService.getUnreadCount(user);
+    return reply.send({ unreadCount });
   });
 
-  // Mark all as read
-  fastify.post('/notifications/read-all', async (request, reply) => {
-    const { role } = request.body as any;
-    if (role) {
-      await db.query('UPDATE notifications SET is_read = TRUE WHERE role = $1', [role]);
-    } else {
-      await db.query('UPDATE notifications SET is_read = TRUE');
+  // 3. Mark Single Notification as Read (Strict IDOR protection)
+  fastify.patch('/notifications/:id/read', { preHandler: [authenticate] }, async (request, reply) => {
+    const { id } = request.params as any;
+    const user = request.user as { id: string; role: string };
+
+    try {
+      const result = await notificationService.markAsRead(id, user);
+      return reply.send(result);
+    } catch (err: any) {
+      const status = err.statusCode || 500;
+      return reply.status(status).send({
+        type: 'https://api.electrakart.com/errors/notification-read-failed',
+        title: 'Mark Read Failed',
+        status,
+        detail: err.message,
+        instance: request.url,
+      });
     }
+  });
+
+  // 4. Mark All Notifications as Read (PATCH and POST alias)
+  const handleMarkAllRead = async (request: any, reply: any) => {
+    const user = request.user as { id: string; role: string };
+    await notificationService.markAllAsRead(user);
     return reply.send({ status: 'SUCCESS' });
+  };
+
+  fastify.patch('/notifications/read-all', { preHandler: [authenticate] }, handleMarkAllRead);
+  fastify.post('/notifications/read-all', { preHandler: [authenticate] }, handleMarkAllRead);
+
+  // 5. Notification Channel Preferences
+  fastify.get('/notifications/preferences', { preHandler: [authenticate] }, async (request, reply) => {
+    const user = request.user as { id: string; role: string };
+    const preferences = await notificationService.getUserPreferences(user.id);
+    return reply.send(preferences);
+  });
+
+  fastify.put('/notifications/preferences', { preHandler: [authenticate] }, async (request, reply) => {
+    const user = request.user as { id: string; role: string };
+    const body = (request.body as any) || {};
+
+    const updated = await notificationService.updateUserPreferences(user.id, {
+      inApp: body.inApp,
+      email: body.email,
+      sms: body.sms,
+      whatsapp: body.whatsapp,
+    });
+
+    return reply.send(updated);
+  });
+
+  // 6. Retry Failed Notification Delivery
+  fastify.post('/notifications/:id/retry', { preHandler: [authenticate] }, async (request, reply) => {
+    const { id } = request.params as any;
+    try {
+      const result = await notificationService.retryNotification(id);
+      return reply.send(result);
+    } catch (err: any) {
+      const status = err.statusCode || 500;
+      return reply.status(status).send({
+        type: 'https://api.electrakart.com/errors/notification-retry-failed',
+        title: 'Retry Failed',
+        status,
+        detail: err.message,
+        instance: request.url,
+      });
+    }
+  });
+
+  // 7. Delivery Status Webhooks (Idempotent, Signature Verified)
+  fastify.post('/notifications/webhooks/:channel', async (request, reply) => {
+    const { channel } = request.params as any;
+    const normChannel = (channel || '').toUpperCase() as NotificationChannel;
+
+    if (!['EMAIL', 'SMS', 'WHATSAPP'].includes(normChannel)) {
+      return reply.status(400).send({
+        type: 'https://api.electrakart.com/errors/invalid-channel',
+        title: 'Invalid Webhook Channel',
+        status: 400,
+        detail: `Unsupported webhook channel: '${channel}'`,
+      });
+    }
+
+    const signature =
+      (request.headers['x-webhook-signature'] as string) ||
+      (request.headers['x-hub-signature-256'] as string) ||
+      (request.headers['x-twilio-signature'] as string) ||
+      (request.headers['x-resend-signature'] as string);
+
+    const rawBody = typeof request.body === 'string' ? request.body : JSON.stringify(request.body || {});
+
+    try {
+      const result = await notificationService.handleWebhook(
+        normChannel,
+        request.body as any,
+        rawBody,
+        signature
+      );
+      return reply.status(200).send(result);
+    } catch (err: any) {
+      const status = err.statusCode || 500;
+      return reply.status(status).send({
+        type: 'https://api.electrakart.com/errors/webhook-verification-failed',
+        title: 'Webhook Processing Error',
+        status,
+        detail: err.message,
+        instance: request.url,
+      });
+    }
   });
 }

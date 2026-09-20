@@ -16,6 +16,7 @@ import {
   InvoiceRecord,
   PartnerSettlementRecord,
 } from './payment.types.js';
+import { notificationService } from '../notifications/notification.service.js';
 
 export class PaymentService {
   /**
@@ -322,6 +323,28 @@ export class PaymentService {
         [verification.status, verification.failureReason || 'Verification failed', verification.providerPaymentId, payment.id]
       );
 
+      // Post-Failure Notification Hook
+      notificationService
+        .publishEvent({
+          eventType: 'ORDER_PAYMENT_FAILED',
+          userId: payment.customer_id,
+          role: 'CUSTOMER',
+          title: `Payment Failed for Order ${payment.order_number}`,
+          message: `Your payment was not authorized (${verification.failureReason || 'Failed'}). Your cart items have been saved.`,
+          entityType: 'ORDER',
+          entityId: payment.order_id,
+          linkActionUrl: `/orders/${payment.order_id}`,
+          recipientPhone: payment.customer_phone,
+          metadata: {
+            orderId: payment.order_id,
+            orderNumber: payment.order_number,
+            failureReason: verification.failureReason,
+            grandTotal: payment.grand_total_inr,
+          },
+          isCriticalTransactional: true,
+        })
+        .catch((e) => console.error('[Notification Hook Error] ORDER_PAYMENT_FAILED:', e));
+
       return {
         isVerified: false,
         orderId: payment.order_id,
@@ -502,6 +525,28 @@ export class PaymentService {
         invoiceNumber,
       };
     });
+
+    // Post-Commit Notification Hook
+    notificationService
+      .publishEvent({
+        eventType: 'ORDER_PAYMENT_SUCCESS',
+        userId: payment.customer_id,
+        role: 'CUSTOMER',
+        title: `Payment Received for Order ${payment.order_number}`,
+        message: `Your payment of ₹${payment.grand_total_inr} has been received. Fulfillments confirmed.`,
+        entityType: 'ORDER',
+        entityId: payment.order_id,
+        linkActionUrl: `/orders/${payment.order_id}`,
+        recipientPhone: payment.customer_phone,
+        metadata: {
+          orderId: payment.order_id,
+          orderNumber: payment.order_number,
+          grandTotal: payment.grand_total_inr,
+          invoiceNumber: confirmedResult.invoiceNumber,
+        },
+        isCriticalTransactional: true,
+      })
+      .catch((e) => console.error('[Notification Hook Error] ORDER_PAYMENT_SUCCESS:', e));
 
     return {
       isVerified: true,

@@ -13,6 +13,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { ElectraKartLogo } from '../common/ElectraKartLogo';
+import { NotificationBell } from '../common/NotificationBell';
 import { useStore } from '../../context/StoreContext';
 import { CATEGORIES_DATA } from '../../data/mockData';
 
@@ -167,6 +168,9 @@ export const CustomerNavbar: React.FC = () => {
             <Package className="w-4 h-4 text-slate-500" />
             <span>Orders</span>
           </Link>
+
+          {/* Real-time In-App Notification Bell */}
+          <NotificationBell role="CUSTOMER" variant="light" />
 
           {/* Cart Badge */}
           <Link
