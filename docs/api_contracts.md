@@ -743,3 +743,457 @@
 *Access:* Authenticated
 
 **Response (`204 No Content`)**
+
+---
+
+## 13. Customer Address Management (`/api/v1/customers/me/addresses`)
+
+### 13.1 List Customer Addresses
+`GET /api/v1/customers/me/addresses`  
+*Access:* `CUSTOMER` (Strict horizontal tenancy isolation by authenticated user ID)
+
+**Response (`200 OK`):**
+```json
+{
+  "addresses": [
+    {
+      "id": "addr-101",
+      "userId": "usr-cust-001",
+      "recipientName": "Anil Kumar Reddy",
+      "phone": "+919848199882",
+      "addressLine1": "Flat 402, Sri Sai Nilayam, Benz Circle",
+      "landmark": "Near Sweet Magic",
+      "city": "Vijayawada",
+      "state": "Andhra Pradesh",
+      "pincode": "520002",
+      "isDefault": true,
+      "createdAt": "2026-09-19T10:00:00Z"
+    }
+  ]
+}
+```
+
+### 13.2 Create Customer Address
+`POST /api/v1/customers/me/addresses`  
+*Access:* `CUSTOMER`
+
+**Request:**
+```json
+{
+  "recipientName": "Anil Kumar Reddy",
+  "phone": "+919848199882",
+  "addressLine1": "Plot 14, Auto Nagar Main Road",
+  "city": "Vijayawada",
+  "state": "Andhra Pradesh",
+  "pincode": "520007",
+  "isDefault": false
+}
+```
+
+**Response (`201 Created`):**
+```json
+{
+  "address": {
+    "id": "addr-102",
+    "userId": "usr-cust-001",
+    "recipientName": "Anil Kumar Reddy",
+    "phone": "+919848199882",
+    "addressLine1": "Plot 14, Auto Nagar Main Road",
+    "city": "Vijayawada",
+    "state": "Andhra Pradesh",
+    "pincode": "520007",
+    "isDefault": false,
+    "createdAt": "2026-09-20T10:00:00Z"
+  }
+}
+```
+
+### 13.3 Update Customer Address
+`PATCH /api/v1/customers/me/addresses/{id}`  
+*Access:* `CUSTOMER` (IDOR Protected: 404/403 if address belongs to another customer)
+
+**Request:**
+```json
+{
+  "isDefault": true
+}
+```
+
+**Response (`200 OK`):**
+```json
+{
+  "address": {
+    "id": "addr-102",
+    "isDefault": true,
+    "updatedAt": "2026-09-20T10:05:00Z"
+  }
+}
+```
+
+### 13.4 Delete Customer Address
+`DELETE /api/v1/customers/me/addresses/{id}`  
+*Access:* `CUSTOMER` (IDOR Protected)
+
+**Response (`200 OK`):**
+```json
+{
+  "success": true
+}
+```
+
+---
+
+## 14. Order Lifecycle & Post-Placement (`/api/v1/orders`, `/api/v1/invoices`)
+
+### 14.1 Cancel Order
+`POST /api/v1/orders/{id}/cancel`  
+*Access:* `CUSTOMER` (Owner), `ADMIN`  
+*Business Rules:*
+- Orders in `CONFIRMED` or `PREPARING` status are cancellable.
+- Orders already `DISPATCHED` or `DELIVERED` reject cancellation with `409 Conflict`.
+- Cancelling an order automatically releases reserved inventory back to available stock.
+- Idempotent: Repeat cancellation of an already cancelled order returns `200 OK` with existing status.
+
+**Request:**
+```json
+{
+  "reason": "Ordered wrong gauge wire by mistake"
+}
+```
+
+**Response (`200 OK`):**
+```json
+{
+  "orderId": "ord-10025",
+  "status": "CANCELLED",
+  "cancelledAt": "2026-09-20T11:00:00Z",
+  "reason": "Ordered wrong gauge wire by mistake"
+}
+```
+
+### 14.2 Get Customer Tax Invoice
+`GET /api/v1/invoices/{orderId}`  
+*Access:* `CUSTOMER` (Order Owner), `ADMIN` (Tenant Isolated)  
+*Zero Financial Leakage Policy:* Tax invoice returns client pricing, GST line items, and invoice number. Strict exclusion of partner purchase costs or platform commission rates.
+
+**Response (`200 OK`):**
+```json
+{
+  "invoice": {
+    "invoiceNumber": "INV-2026-0010025",
+    "orderId": "ord-10025",
+    "orderNumber": "EK-10025",
+    "customer": {
+      "name": "Anil Kumar Reddy",
+      "phone": "+919848199882",
+      "billingAddress": "Flat 402, Benz Circle, Vijayawada - 520002"
+    },
+    "seller": {
+      "businessName": "Vijayawada Electricals",
+      "gstin": "37AAAAA1234A1Z5",
+      "address": "Governorpet, Vijayawada"
+    },
+    "items": [
+      {
+        "sku": "POL-WX-25-RED-90M",
+        "description": "Polycab 2.5 sq mm Single Core FR PVC Copper Wire 90m",
+        "hsnCode": "8544",
+        "quantity": 2,
+        "unitPriceINR": 2450.00,
+        "taxableAmountINR": 4152.54,
+        "gstRate": 18,
+        "cgstINR": 373.73,
+        "sgstINR": 373.73,
+        "totalINR": 4900.00
+      }
+    ],
+    "subtotalINR": 4152.54,
+    "cgstINR": 373.73,
+    "sgstINR": 373.73,
+    "grandTotalINR": 4900.00,
+    "createdAt": "2026-09-20T09:30:00Z"
+  }
+}
+```
+
+---
+
+## 15. Inventory Ledger & Double-Entry Auditing (`/api/v1/inventory`)
+
+### 15.1 Query Inventory Transaction Ledger
+`GET /api/v1/inventory/transactions?sku=POL-WX-25-RED-90M&partnerId=partner-1&limit=50`  
+*Access:* `RETAILER` (Own partner records only), `DISTRIBUTOR`, `ADMIN`  
+*Invariants Enforced:*
+- `reserved <= in_stock`
+- `available = in_stock - reserved`
+- Every stock movement (allocation, dispatch, transfer, cancellation release) creates an immutable transaction row.
+
+**Response (`200 OK`):**
+```json
+{
+  "transactions": [
+    {
+      "id": "inv-tx-1001",
+      "sku": "POL-WX-25-RED-90M",
+      "partnerId": "partner-1",
+      "warehouseId": null,
+      "transactionType": "STOCK_RESERVATION",
+      "quantityDelta": -2,
+      "stockBefore": 50,
+      "stockAfter": 48,
+      "referenceType": "ORDER",
+      "referenceId": "ord-10025",
+      "createdAt": "2026-09-20T09:25:00Z"
+    },
+    {
+      "id": "inv-tx-1002",
+      "sku": "POL-WX-25-RED-90M",
+      "partnerId": "partner-1",
+      "warehouseId": null,
+      "transactionType": "ORDER_DISPATCHED",
+      "quantityDelta": -2,
+      "stockBefore": 48,
+      "stockAfter": 48,
+      "referenceType": "ORDER",
+      "referenceId": "ord-10025",
+      "createdAt": "2026-09-20T09:45:00Z"
+    }
+  ]
+}
+```
+
+---
+
+## 16. Multi-Warehouse Inter-Depot Transfers (`/api/v1/warehouses/transfers`)
+
+### 16.1 Create Transfer Request
+`POST /api/v1/warehouses/transfers`  
+*Access:* `DISTRIBUTOR`, `ADMIN`
+
+**Request:**
+```json
+{
+  "sourceWarehouseId": "wh-hyd-sanathnagar",
+  "destinationWarehouseId": "wh-vja-autonagar",
+  "sku": "POL-WX-25-RED-90M",
+  "quantity": 100,
+  "reason": "Replenish regional project demands"
+}
+```
+
+**Response (`201 Created`):**
+```json
+{
+  "transfer": {
+    "id": "trf-1001",
+    "transferNumber": "TRF-2026-0001",
+    "sourceWarehouseId": "wh-hyd-sanathnagar",
+    "destinationWarehouseId": "wh-vja-autonagar",
+    "sku": "POL-WX-25-RED-90M",
+    "quantity": 100,
+    "status": "CREATED",
+    "createdAt": "2026-09-20T08:00:00Z"
+  }
+}
+```
+
+### 16.2 Approve Transfer Request
+`POST /api/v1/warehouses/transfers/{id}/approve`  
+*Access:* `DISTRIBUTOR`, `ADMIN`
+
+**Response (`200 OK`):**
+```json
+{
+  "transfer": {
+    "id": "trf-1001",
+    "status": "APPROVED",
+    "approvedAt": "2026-09-20T08:15:00Z"
+  }
+}
+```
+
+### 16.3 Dispatch Transfer Request
+`POST /api/v1/warehouses/transfers/{id}/dispatch`  
+*Access:* `DISTRIBUTOR`, `ADMIN`  
+*Invariant:* Source warehouse available stock is atomically decremented and transfer moves to `IN_TRANSIT`.
+
+**Response (`200 OK`):**
+```json
+{
+  "transfer": {
+    "id": "trf-1001",
+    "status": "IN_TRANSIT",
+    "dispatchedAt": "2026-09-20T08:45:00Z"
+  }
+}
+```
+
+### 16.4 Receive Transfer Request
+`POST /api/v1/warehouses/transfers/{id}/receive`  
+*Access:* `DISTRIBUTOR`, `ADMIN`  
+*Invariant:* Destination warehouse stock is atomically incremented, and status transitions to `RECEIVED`. Idempotent: Repeat receive requests return `200 OK`.
+
+**Response (`200 OK`):**
+```json
+{
+  "transfer": {
+    "id": "trf-1001",
+    "status": "RECEIVED",
+    "receivedAt": "2026-09-20T12:00:00Z"
+  }
+}
+```
+
+### 16.5 Cancel Transfer Request
+`POST /api/v1/warehouses/transfers/{id}/cancel`  
+*Access:* `DISTRIBUTOR`, `ADMIN`  
+*Invariant:* Cancelling before dispatch releases any warehouse lock. Cancelling after dispatch is rejected with `409 Conflict`.
+
+**Response (`200 OK`):**
+```json
+{
+  "transfer": {
+    "id": "trf-1001",
+    "status": "CANCELLED",
+    "cancelledAt": "2026-09-20T08:10:00Z"
+  }
+}
+```
+
+---
+
+## 17. Quotation Lifecycle & Price Lock Protection (`/api/v1/quotations`)
+
+### 17.1 Generate Quotation with 48-Hour Price Lock
+`POST /api/v1/quotations/generate`  
+*Access:* `CUSTOMER`, `RETAILER`  
+*Behavior:* Locks prices and inventory allocation for exactly 48 hours. Returns `validUntil` and `isPriceLocked: true`.
+
+**Request:**
+```json
+{
+  "items": [
+    { "sku": "POL-WX-25-RED-90M", "quantity": 10 }
+  ],
+  "pincode": "520002"
+}
+```
+
+**Response (`201 Created`):**
+```json
+{
+  "quotationId": "quot-10042",
+  "quoteNumber": "QT-2026-0042",
+  "totalAmount": 24500.00,
+  "validUntil": "2026-09-22T09:00:00Z",
+  "isPriceLocked": true,
+  "status": "GENERATED"
+}
+```
+
+### 17.2 Cancel Quotation
+`POST /api/v1/quotations/{id}/cancel`  
+*Access:* `CUSTOMER` (Owner), `ADMIN` (IDOR Protected: 403/404 if accessed by unauthorized customer)
+
+**Response (`200 OK`):**
+```json
+{
+  "quotationId": "quot-10042",
+  "status": "CANCELLED",
+  "cancelledAt": "2026-09-20T10:30:00Z"
+}
+```
+
+---
+
+## 18. Admin Auditing, User Governance, and Settlements (`/api/v1/admin`)
+
+### 18.1 Query Audit Logs
+`GET /api/v1/admin/audit-logs?entityType=ORDER&limit=50`  
+*Access:* `ADMIN` (Vertical RBAC: 403 Forbidden for `CUSTOMER`, `RETAILER`, `DISTRIBUTOR`)
+
+**Response (`200 OK`):**
+```json
+{
+  "logs": [
+    {
+      "id": "aud-1001",
+      "userId": "usr-admin-01",
+      "action": "ORDER_STATUS_OVERRIDE",
+      "entityType": "ORDER",
+      "entityId": "ord-10025",
+      "details": { "previousStatus": "CONFIRMED", "newStatus": "PREPARING" },
+      "ipAddress": "127.0.0.1",
+      "createdAt": "2026-09-20T09:20:00Z"
+    }
+  ]
+}
+```
+
+### 18.2 List & Manage Platform Users
+`GET /api/v1/admin/users?role=RETAILER`  
+*Access:* `ADMIN`
+
+**Response (`200 OK`):**
+```json
+{
+  "users": [
+    {
+      "id": "usr-ret-001",
+      "phoneNumber": "+919848123456",
+      "fullName": "Suresh Varma",
+      "role": "RETAILER",
+      "partnerId": "partner-1",
+      "isActive": true,
+      "createdAt": "2026-09-18T10:00:00Z"
+    }
+  ]
+}
+```
+
+### 18.3 Admin Partner Settlements Overview & Manual Disbursement
+`GET /api/v1/admin/settlements`  
+*Access:* `ADMIN`
+
+**Response (`200 OK`):**
+```json
+{
+  "settlements": [
+    {
+      "id": "set-1001",
+      "partnerId": "partner-1",
+      "partnerName": "Vijayawada Electricals",
+      "orderId": "ord-10025",
+      "grossSalesINR": 4900.00,
+      "platformCommissionINR": 269.50,
+      "tdsDeductedINR": 49.00,
+      "netPayoutINR": 4581.50,
+      "status": "PENDING",
+      "createdAt": "2026-09-20T09:45:00Z"
+    }
+  ]
+}
+```
+
+`POST /api/v1/admin/settlements/{id}/disburse`  
+*Access:* `ADMIN`
+
+**Request:**
+```json
+{
+  "bankUtrNumber": "SBIN20260920001",
+  "disbursementNotes": "Weekly batch settlement cleared via NEFT"
+}
+```
+
+**Response (`200 OK`):**
+```json
+{
+  "settlement": {
+    "id": "set-1001",
+    "status": "SETTLED",
+    "bankUtrNumber": "SBIN20260920001",
+    "disbursedAt": "2026-09-20T12:00:00Z"
+  }
+}
+```

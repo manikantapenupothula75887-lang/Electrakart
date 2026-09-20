@@ -9,6 +9,7 @@ import { runEstimateOcrTests } from './estimate_ocr.test.js';
 import { runLocationFulfillmentTests } from './location_fulfillment.test.js';
 import { runNotificationCommunicationTests } from './notification_communication.test.js';
 import { runBusinessCompletionTests } from './business_completion.test.js';
+import { runFinalAcceptanceAuditTests } from './final_acceptance_audit.test.js';
 import { db } from '../src/db/connection.js';
 
 async function run() {
@@ -31,6 +32,7 @@ async function run() {
     await runLocationFulfillmentTests();
     await runNotificationCommunicationTests();
     await runBusinessCompletionTests();
+    await runFinalAcceptanceAuditTests();
 
     console.log('\n====================================================');
     console.log('  🎉 ALL BACKEND TESTS PASSED (100% SUCCESS)');
