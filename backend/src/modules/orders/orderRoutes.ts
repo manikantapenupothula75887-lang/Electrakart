@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { db } from '../../db/connection.js';
 import { optionalAuthenticate, authenticate } from '../../middleware/auth.js';
 import { checkIdempotency, recordIdempotency } from '../../middleware/idempotency.js';
+import { paymentService } from '../payments/payment.service.js';
 
 export async function orderRoutes(fastify: FastifyInstance) {
   // Create unified order with multi-store split fulfillment
@@ -649,5 +650,28 @@ export async function orderRoutes(fastify: FastifyInstance) {
       status,
       updatedAt: new Date().toISOString(),
     });
+  });
+
+  // Cancel entire order & atomically roll back inventory
+  fastify.post('/orders/:id/cancel', { preHandler: [optionalAuthenticate] }, async (request, reply) => {
+    const { id } = request.params as any;
+    const { reason } = (request.body as any) || {};
+
+    try {
+      const result = await paymentService.cancelOrder(id, request.user, reason);
+      return reply.send(result);
+    } catch (err: any) {
+      const isForbidden = err.message.includes('Forbidden');
+      const isProhibited = err.message.includes('dispatched or delivered');
+      const status = isForbidden ? 403 : isProhibited ? 409 : 404;
+
+      return reply.status(status).send({
+        type: 'https://api.electrakart.com/errors/cancellation-failed',
+        title: 'Cancellation Failed',
+        status,
+        detail: err.message,
+        instance: request.url,
+      });
+    }
   });
 }

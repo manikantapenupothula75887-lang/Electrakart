@@ -30,6 +30,13 @@ export interface Config {
   rateLimitWindowMs: number;
   bodyLimitBytes: number;
   logLevel: string;
+  paymentProvider: 'mock' | 'razorpay' | 'cashfree';
+  razorpayKeyId: string;
+  razorpayKeySecret: string;
+  razorpayWebhookSecret: string;
+  cashfreeAppId: string;
+  cashfreeSecretKey: string;
+  cashfreeApiVersion: string;
 }
 
 const INSECURE_DEV_SECRETS = [
@@ -84,6 +91,24 @@ export function getValidatedConfig(customEnv?: NodeJS.ProcessEnv): Config {
     );
   }
 
+  const paymentProvider = (env.PAYMENT_PROVIDER || (isProd ? 'razorpay' : 'mock')).toLowerCase() as
+    | 'mock'
+    | 'razorpay'
+    | 'cashfree';
+
+  if (isProd && (paymentProvider === 'mock' || env.PAYMENT_PROVIDER === 'mock')) {
+    throw new Error(
+      '[Config Error] In production, PAYMENT_PROVIDER cannot be "mock". A real payment provider (e.g. razorpay or cashfree) must be configured. Startup aborted.'
+    );
+  }
+
+  const razorpayKeyId = env.RAZORPAY_KEY_ID || '';
+  const razorpayKeySecret = env.RAZORPAY_KEY_SECRET || '';
+  const razorpayWebhookSecret = env.RAZORPAY_WEBHOOK_SECRET || '';
+  const cashfreeAppId = env.CASHFREE_APP_ID || '';
+  const cashfreeSecretKey = env.CASHFREE_SECRET_KEY || '';
+  const cashfreeApiVersion = env.CASHFREE_API_VERSION || '2023-08-01';
+
   return {
     nodeEnv: currentEnv,
     isProduction: isProd,
@@ -101,6 +126,13 @@ export function getValidatedConfig(customEnv?: NodeJS.ProcessEnv): Config {
     rateLimitWindowMs: parseInt(env.RATE_LIMIT_WINDOW_MS || '60000', 10),
     bodyLimitBytes: parseInt(env.BODY_LIMIT_BYTES || '1048576', 10),
     logLevel: env.LOG_LEVEL || (isProd ? 'info' : 'info'),
+    paymentProvider,
+    razorpayKeyId,
+    razorpayKeySecret,
+    razorpayWebhookSecret,
+    cashfreeAppId,
+    cashfreeSecretKey,
+    cashfreeApiVersion,
   };
 }
 

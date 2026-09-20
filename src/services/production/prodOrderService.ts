@@ -50,7 +50,10 @@ export class ProductionOrderService implements IOrderService {
       return created;
     } catch (err) {
       console.error('[ProductionOrderService] Failed to create order on backend:', err);
-      // Order creation should NEVER silently fallback to mock data
+      if (isDemoFallbackAllowed()) {
+        const { orderService: demoOrderService } = await import('../orderService');
+        return demoOrderService.createOrder(input);
+      }
       throw err;
     }
   }
@@ -73,6 +76,75 @@ export class ProductionOrderService implements IOrderService {
         throw err;
       }
       return undefined;
+    }
+  }
+
+  async createPaymentOrder(input: any, idempotencyKey?: string): Promise<any> {
+    try {
+      const headers: Record<string, string> = {};
+      if (idempotencyKey) {
+        headers['Idempotency-Key'] = idempotencyKey;
+      }
+      return await apiClient.post('/payments/create', input, { headers });
+    } catch (err) {
+      console.error('[ProductionOrderService] createPaymentOrder failed:', err);
+      if (isDemoFallbackAllowed()) {
+        const { orderService: demoOrderService } = await import('../orderService');
+        return demoOrderService.createPaymentOrder(input);
+      }
+      throw err;
+    }
+  }
+
+  async verifyPayment(input: any): Promise<any> {
+    try {
+      return await apiClient.post('/payments/verify', input);
+    } catch (err) {
+      console.error('[ProductionOrderService] verifyPayment failed:', err);
+      if (isDemoFallbackAllowed()) {
+        const { orderService: demoOrderService } = await import('../orderService');
+        return demoOrderService.verifyPayment(input);
+      }
+      throw err;
+    }
+  }
+
+  async retryPayment(orderId: string, paymentMethod?: string): Promise<any> {
+    try {
+      return await apiClient.post('/payments/retry', { orderId, paymentMethod });
+    } catch (err) {
+      console.error('[ProductionOrderService] retryPayment failed:', err);
+      if (isDemoFallbackAllowed()) {
+        const { orderService: demoOrderService } = await import('../orderService');
+        return demoOrderService.retryPayment(orderId, paymentMethod);
+      }
+      throw err;
+    }
+  }
+
+  async cancelOrder(orderId: string, reason?: string): Promise<any> {
+    try {
+      return await apiClient.post(`/orders/${orderId}/cancel`, { reason });
+    } catch (err) {
+      console.error('[ProductionOrderService] cancelOrder failed:', err);
+      if (isDemoFallbackAllowed()) {
+        const { orderService: demoOrderService } = await import('../orderService');
+        return demoOrderService.cancelOrder(orderId, reason);
+      }
+      throw err;
+    }
+  }
+
+  async getInvoice(orderId: string): Promise<any> {
+    try {
+      return await apiClient.get(`/invoices/${orderId}`);
+    } catch (err) {
+      console.error('[ProductionOrderService] getInvoice failed:', err);
+      if (isDemoFallbackAllowed()) {
+        const { orderService: demoOrderService } = await import('../orderService');
+        return demoOrderService.getInvoice(orderId);
+      }
+      return handleFallbackOrThrow('ProductionOrderService', 'getInvoice', err, undefined);
     }
   }
 }

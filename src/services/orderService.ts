@@ -22,13 +22,18 @@ export interface CreateOrderInput {
 export interface IOrderService {
   getOrders(): Promise<Order[]>;
   getOrderById(id: string): Promise<Order | undefined>;
-  createOrder(input: CreateOrderInput): Promise<Order>;
+  createOrder(input: CreateOrderInput, idempotencyKey?: string): Promise<Order>;
   updateFulfillmentStatus(
     orderId: string,
     fulfillmentId: string,
     status: OrderStatus,
     note?: string
   ): Promise<Order | undefined>;
+  createPaymentOrder(input: any, idempotencyKey?: string): Promise<any>;
+  verifyPayment(input: any): Promise<any>;
+  retryPayment(orderId: string, paymentMethod?: string): Promise<any>;
+  cancelOrder(orderId: string, reason?: string): Promise<any>;
+  getInvoice(orderId: string): Promise<any>;
 }
 
 class DemoOrderService implements IOrderService {
@@ -184,6 +189,79 @@ class DemoOrderService implements IOrderService {
 
     this.saveOrders(updated);
     return updatedOrder;
+  }
+
+  async createPaymentOrder(input: any): Promise<any> {
+    const order = await this.createOrder(input);
+    return {
+      paymentId: `pay_demo_${Date.now()}`,
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      provider: 'MOCK',
+      providerOrderId: `order_mock_${Date.now()}`,
+      amountInr: order.grandTotal,
+      currency: 'INR',
+    };
+  }
+
+  async verifyPayment(input: any): Promise<any> {
+    return {
+      isVerified: true,
+      orderId: input.orderId,
+      paymentStatus: 'CAPTURED',
+      overallStatus: 'CONFIRMED',
+      invoiceNumber: `INV-${Date.now()}`,
+    };
+  }
+
+  async retryPayment(orderId: string, paymentMethod = 'UPI'): Promise<any> {
+    const order = await this.getOrderById(orderId);
+    return {
+      paymentId: `pay_demo_${Date.now()}`,
+      orderId,
+      orderNumber: order?.orderNumber || `EK-99999`,
+      provider: 'MOCK',
+      providerOrderId: `order_mock_${Date.now()}`,
+      amountInr: order?.grandTotal || 0,
+      currency: 'INR',
+    };
+  }
+
+  async cancelOrder(orderId: string, reason?: string): Promise<any> {
+    const orders = this.loadOrders();
+    const updated = orders.map((o) => {
+      if (o.id !== orderId) return o;
+      return {
+        ...o,
+        overallStatus: 'CANCELLED' as OrderStatus,
+        paymentStatus: 'REFUNDED' as any,
+      };
+    });
+    this.saveOrders(updated);
+    return { orderId, overallStatus: 'CANCELLED', inventoryReleased: true };
+  }
+
+  async getInvoice(orderId: string): Promise<any> {
+    const order = await this.getOrderById(orderId);
+    if (!order) return undefined;
+    return {
+      id: `inv-${order.id}`,
+      invoiceNumber: `INV-${order.orderNumber}`,
+      orderId: order.id,
+      customerName: order.customerName,
+      customerPhone: order.customerPhone,
+      billingAddress: order.deliveryAddress,
+      shippingAddress: order.deliveryAddress,
+      items: order.fulfillments.flatMap((f) => f.items),
+      subtotalInr: order.subtotal,
+      discountInr: order.discount,
+      deliveryFeeInr: order.deliveryFee,
+      gstTotalInr: order.gstTotal,
+      grandTotalInr: order.grandTotal,
+      paymentMethod: order.paymentMethod,
+      paymentStatus: order.paymentStatus,
+      createdAt: order.createdAt,
+    };
   }
 }
 

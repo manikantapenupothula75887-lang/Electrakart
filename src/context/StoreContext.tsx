@@ -94,6 +94,8 @@ interface StoreContextType {
     paymentMethod: 'UPI' | 'NET_BANKING' | 'TRADE_CREDIT' | 'COD';
   }) => Order;
   updateFulfillmentStatus: (orderId: string, fulfillmentId: string, status: OrderStatus, note?: string) => void;
+  syncOrder: (order: Order) => void;
+  cancelOrder: (orderId: string, reason?: string) => Promise<boolean>;
 
   // Retailer
   retailerInventory: PartnerInventoryItem[];
@@ -903,6 +905,53 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     );
   };
 
+  const syncOrder = (order: Order) => {
+    setOrders((prev) => {
+      const idx = prev.findIndex((o) => o.id === order.id || o.orderNumber === order.orderNumber);
+      if (idx > -1) {
+        const next = [...prev];
+        next[idx] = order;
+        return next;
+      }
+      return [order, ...prev];
+    });
+  };
+
+  const cancelOrder = async (orderId: string, reason?: string): Promise<boolean> => {
+    try {
+      await orderService.cancelOrder(orderId, reason);
+      setOrders((prev) =>
+        prev.map((o) => {
+          if (o.id === orderId || o.orderNumber === orderId) {
+            return {
+              ...o,
+              overallStatus: 'CANCELLED' as OrderStatus,
+              paymentStatus: 'REFUNDED' as any,
+              fulfillments: o.fulfillments.map((f) => ({
+                ...f,
+                status: 'CANCELLED' as OrderStatus,
+                trackingHistory: [
+                  ...f.trackingHistory,
+                  {
+                    status: 'CANCELLED' as OrderStatus,
+                    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    title: 'Order Cancelled',
+                    description: reason || 'Customer requested order cancellation before dispatch.',
+                  },
+                ],
+              })),
+            };
+          }
+          return o;
+        })
+      );
+      return true;
+    } catch (err) {
+      console.error('[StoreContext] Failed to cancel order:', err);
+      throw err;
+    }
+  };
+
   // Retailer Inventory actions
   const adjustRetailerStock = (sku: string, delta: number) => {
     setRetailerInventory((prev) =>
@@ -1090,6 +1139,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         orders,
         placeOrder,
         updateFulfillmentStatus,
+        syncOrder,
+        cancelOrder,
         retailerInventory,
         adjustRetailerStock,
         importBulkInventory,

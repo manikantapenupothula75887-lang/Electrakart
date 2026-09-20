@@ -19,6 +19,7 @@ import { partnerRoutes } from './modules/partners/partnerRoutes.js';
 import { warehouseRoutes } from './modules/warehouses/warehouseRoutes.js';
 import { notificationRoutes } from './modules/notifications/notificationRoutes.js';
 import { adminRoutes } from './modules/admin/adminRoutes.js';
+import { paymentRoutes } from './modules/payments/payment.routes.js';
 
 export function buildApp(): FastifyInstance {
   const app = Fastify({
@@ -35,6 +36,8 @@ export function buildApp(): FastifyInstance {
         'body.otp',
         'body.purchaseCost',
         'body.dealerMargin',
+        'body.keySecret',
+        'body.webhookSecret',
       ],
     },
   });
@@ -137,6 +140,7 @@ export function buildApp(): FastifyInstance {
       v1.register(warehouseRoutes);
       v1.register(notificationRoutes);
       v1.register(adminRoutes);
+      v1.register(paymentRoutes);
     },
     { prefix: '/api/v1' }
   );

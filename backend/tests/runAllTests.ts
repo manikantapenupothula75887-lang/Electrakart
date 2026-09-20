@@ -4,6 +4,7 @@ import { runAuthTests } from './auth.test.js';
 import { runSecurityLeakageTests } from './security_leakage.test.js';
 import { runOrdersInventoryTests } from './orders_inventory.test.js';
 import { runProductionReadinessTests } from './production_readiness.test.js';
+import { runPaymentsTests } from './payments.test.js';
 import { db } from '../src/db/connection.js';
 
 async function run() {
@@ -21,6 +22,7 @@ async function run() {
     await runSecurityLeakageTests();
     await runOrdersInventoryTests();
     await runProductionReadinessTests();
+    await runPaymentsTests();
 
     console.log('\n====================================================');
     console.log('  🎉 ALL BACKEND TESTS PASSED (100% SUCCESS)');

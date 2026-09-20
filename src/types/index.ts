@@ -272,7 +272,7 @@ export interface Order {
   gstTotal: number;
   grandTotal: number;
   paymentMethod: 'UPI' | 'NET_BANKING' | 'TRADE_CREDIT' | 'COD';
-  paymentStatus: 'PAID' | 'PENDING';
+  paymentStatus: 'PAID' | 'PENDING' | 'REFUNDED' | 'FAILED' | 'PARTIALLY_REFUNDED';
   overallStatus: OrderStatus;
 }
 
