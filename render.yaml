@@ -1,0 +1,82 @@
+# ==============================================================================
+# ElectraKart Production Infrastructure Blueprint (Render)
+# Managed PostgreSQL 16 + Fastify Node 22 API + React 19 SPA Frontend
+# ==============================================================================
+
+databases:
+  - name: electrakart-db
+    databaseName: electrakart_production
+    user: electrakart_admin
+    plan: free
+    region: singapore
+    postgresMajorVersion: 16
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. ElectraKart Fastify 5 Backend API
+  # ----------------------------------------------------------------------------
+  - type: web
+    name: electrakart-api
+    runtime: node
+    plan: free
+    region: singapore
+    rootDir: backend
+    buildCommand: npm ci && npm run build
+    preDeployCommand: npm run migrate
+    startCommand: npm run start
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: HOST
+        value: 0.0.0.0
+      - key: DATABASE_URL
+        fromDatabase:
+          name: electrakart-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 24h
+      - key: CORS_ORIGIN
+        fromService:
+          type: web
+          name: electrakart-web
+          property: url
+      - key: LOG_LEVEL
+        value: info
+      - key: DB_POOL_MAX
+        value: 20
+      - key: DB_IDLE_TIMEOUT_MS
+        value: 30000
+      - key: DB_CONNECTION_TIMEOUT_MS
+        value: 5000
+      - key: AUTO_SEED
+        value: "false"
+
+  # ----------------------------------------------------------------------------
+  # 2. ElectraKart React 19 SPA Frontend
+  # ----------------------------------------------------------------------------
+  - type: web
+    name: electrakart-web
+    runtime: static
+    plan: free
+    region: singapore
+    rootDir: .
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_ALLOW_DEMO_FALLBACK
+        value: "false"
+      - key: VITE_API_BASE_URL
+        fromService:
+          type: web
+          name: electrakart-api
+          property: url
+          format: "%s/api/v1"

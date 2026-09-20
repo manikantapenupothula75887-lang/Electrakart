@@ -44,11 +44,20 @@ class PostgresDatabase implements IDatabase {
 
     if (isExternalPg) {
       this.engineType = 'PG_POOL';
+      const isRemoteHost =
+        !config.databaseUrl.includes('localhost') &&
+        !config.databaseUrl.includes('127.0.0.1') &&
+        !config.databaseUrl.includes('postgres:5432');
+      const useSsl =
+        process.env.DB_SSL === 'true' ||
+        (process.env.DB_SSL !== 'false' && (config.databaseUrl.includes('sslmode=') || isRemoteHost));
+
       this.pool = new pg.Pool({
         connectionString: config.databaseUrl,
         max: config.dbPoolMax,
         idleTimeoutMillis: config.dbIdleTimeoutMs,
         connectionTimeoutMillis: config.dbConnectionTimeoutMs,
+        ssl: useSsl ? { rejectUnauthorized: false } : undefined,
       });
 
       this.pool.on('error', (err) => {
