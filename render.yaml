@@ -22,7 +22,6 @@ services:
     region: singapore
     rootDir: backend
     buildCommand: npm ci && npm run build
-    preDeployCommand: npm run migrate
     startCommand: npm run start
     healthCheckPath: /api/v1/health
     envVars:
@@ -44,7 +43,7 @@ services:
         fromService:
           type: web
           name: electrakart-web
-          property: url
+          property: host
       - key: LOG_LEVEL
         value: info
       - key: DB_POOL_MAX
@@ -83,7 +82,6 @@ services:
     name: electrakart-web
     runtime: static
     plan: free
-    region: singapore
     rootDir: .
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
@@ -98,4 +96,4 @@ services:
         fromService:
           type: web
           name: electrakart-api
-          property: url
+          property: host

@@ -29,7 +29,10 @@ class ApiClient {
   private baseURL: string;
 
   constructor(baseURL?: string) {
-    let url = baseURL || (import.meta.env?.VITE_API_BASE_URL as string) || '/api/v1';
+    let url = (baseURL || (import.meta.env?.VITE_API_BASE_URL as string) || '/api/v1').trim();
+    if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('/')) {
+      url = `https://${url}`;
+    }
     if (url.startsWith('http') && !url.includes('/api/v1')) {
       url = `${url.replace(/\/+$/, '')}/api/v1`;
     }

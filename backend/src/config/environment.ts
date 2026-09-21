@@ -112,16 +112,27 @@ export function getValidatedConfig(customEnv?: NodeJS.ProcessEnv): Config {
   }
 
   const corsOriginRaw = env.CORS_ORIGIN || (isProd ? 'https://electrakart.com' : 'http://localhost:5173');
-  const corsOrigins = corsOriginRaw
+  const rawOrigins = corsOriginRaw
     .split(',')
-    .map((s) => s.trim())
+    .map((s) => s.trim().replace(/\/+$/, ''))
     .filter(Boolean);
 
-  if (isProd && corsOrigins.includes('*')) {
+  if (isProd && rawOrigins.includes('*')) {
     throw new Error(
       '[Config Error] In production, CORS_ORIGIN cannot be wildcard "*" for authenticated API access. Startup aborted.'
     );
   }
+
+  const corsOrigins = Array.from(
+    new Set(
+      rawOrigins.flatMap((item) => {
+        if (!item.startsWith('http://') && !item.startsWith('https://')) {
+          return [`https://${item}`, `http://${item}`, item];
+        }
+        return [item];
+      })
+    )
+  );
 
   const paymentProvider = (env.PAYMENT_PROVIDER || (isProd ? 'razorpay' : 'mock')).toLowerCase() as
     | 'mock'
