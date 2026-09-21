@@ -81,7 +81,6 @@ services:
   - type: web
     name: electrakart-web
     runtime: static
-    plan: free
     rootDir: .
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
