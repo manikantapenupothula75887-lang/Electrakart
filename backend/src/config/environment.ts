@@ -257,7 +257,13 @@ export function getValidatedConfig(customEnv?: NodeJS.ProcessEnv): Config {
     host: env.API_HOST || env.HOST || '0.0.0.0',
     corsOrigins,
     jwtSecret,
-    jwtExpiresIn: parseInt(env.JWT_EXPIRES_IN || '86400', 10),
+    jwtExpiresIn: (() => {
+      const raw = env.JWT_EXPIRES_IN || '86400';
+      if (/^\d+h$/i.test(raw)) return parseInt(raw, 10) * 3600;
+      if (/^\d+d$/i.test(raw)) return parseInt(raw, 10) * 86400;
+      if (/^\d+m$/i.test(raw)) return parseInt(raw, 10) * 60;
+      return parseInt(raw, 10) || 86400;
+    })(),
     databaseUrl,
     dbPoolMax: parseInt(env.DB_POOL_MAX || '20', 10),
     dbIdleTimeoutMs: parseInt(env.DB_IDLE_TIMEOUT_MS || '30000', 10),

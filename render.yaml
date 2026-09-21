@@ -39,7 +39,7 @@ services:
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_EXPIRES_IN
-        value: 24h
+        value: "86400"
       - key: CORS_ORIGIN
         fromService:
           type: web
@@ -55,6 +55,26 @@ services:
         value: 5000
       - key: AUTO_SEED
         value: "false"
+      - key: PAYMENT_PROVIDER
+        value: razorpay
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+      - key: OCR_PROVIDER
+        value: google_document_ai
+      - key: GOOGLE_DOC_AI_PROJECT_ID
+        sync: false
+      - key: GOOGLE_DOC_AI_LOCATION
+        value: us
+      - key: GOOGLE_DOC_AI_PROCESSOR_ID
+        sync: false
+      - key: MAPS_PROVIDER
+        value: google_maps
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
 
   # ----------------------------------------------------------------------------
   # 2. ElectraKart React 19 SPA Frontend
@@ -79,4 +99,3 @@ services:
           type: web
           name: electrakart-api
           property: url
-          format: "%s/api/v1"
