@@ -7,9 +7,14 @@ import { IOcrProvider } from './ocr.types.js';
 import { MockOcrProvider } from './providers/mock.ocr.provider.js';
 import { GoogleDocAiOcrProvider } from './providers/google_doc_ai.provider.js';
 import { AwsTextractOcrProvider } from './providers/aws_textract.provider.js';
+import { DisabledOcrProvider } from './providers/disabled.ocr.provider.js';
 import { config } from '../../config/environment.js';
 
 let cachedProvider: IOcrProvider | null = null;
+
+export function resetOcrProviderCache(): void {
+  cachedProvider = null;
+}
 
 export function getOcrProvider(forceProvider?: string): IOcrProvider {
   const providerType = (forceProvider || config.ocrProvider || 'mock').toLowerCase();
@@ -17,7 +22,7 @@ export function getOcrProvider(forceProvider?: string): IOcrProvider {
   // Strict production safety guard
   if ((config.isProduction || process.env.NODE_ENV === 'production') && (providerType === 'mock' || config.ocrProvider === 'mock')) {
     throw new Error(
-      '[Security Alert] Mock OCR provider cannot be instantiated in production environment. A live external OCR provider (Google Document AI or AWS Textract) must be configured.'
+      '[Security Alert] Mock OCR provider cannot be instantiated in production environment. A live external OCR provider (Google Document AI or AWS Textract) must be configured, or OCR must be set to disabled.'
     );
   }
 
@@ -42,6 +47,10 @@ export function getOcrProvider(forceProvider?: string): IOcrProvider {
         accessKeyId: config.awsTextractAccessKeyId,
         secretAccessKey: config.awsTextractSecretAccessKey,
       });
+      break;
+
+    case 'disabled':
+      provider = new DisabledOcrProvider();
       break;
 
     case 'mock':

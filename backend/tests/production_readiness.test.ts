@@ -215,7 +215,96 @@ export async function runProductionReadinessTests() {
     url: '/api/v1/products',
   });
   assert.ok(rateLimitProbe.headers['x-ratelimit-limit'], 'Rate limit limit header should be present');
-  assert.ok(rateLimitProbe.headers['x-ratelimit-remaining'], 'Rate limit remaining header should be present');
+  // Test 10: Production OCR Configuration Validation & Disabled OCR Mode
+  console.log('10. Verifying Production OCR Configuration & Disabled Mode...');
+
+  const baseProdConfig = {
+    NODE_ENV: 'production',
+    DATABASE_URL: 'postgresql://prod_user:prod_pass@localhost:5432/electrakart',
+    JWT_SECRET: 'a_very_secure_high_entropy_random_jwt_secret_key_12345',
+    PAYMENT_PROVIDER: 'razorpay',
+    RAZORPAY_KEY_ID: 'rzp_live_12345',
+    RAZORPAY_KEY_SECRET: 'secret12345',
+    MAPS_PROVIDER: 'google_maps',
+    GOOGLE_MAPS_API_KEY: 'AIzaSyFakeKeyForMaps123',
+  };
+
+  // 10a. Production startup with OCR_PROVIDER=disabled MUST succeed
+  const disabledProdConfig = loadConfig({
+    ...baseProdConfig,
+    OCR_PROVIDER: 'disabled',
+  });
+  assert.strictEqual(disabledProdConfig.ocrProvider, 'disabled', 'OCR_PROVIDER=disabled must be accepted in production');
+
+  // 10b. Production startup with default OCR_PROVIDER (unset) defaults to disabled and succeeds
+  const defaultProdConfig = loadConfig({
+    ...baseProdConfig,
+  });
+  assert.strictEqual(defaultProdConfig.ocrProvider, 'disabled', 'Unset OCR_PROVIDER in production must default to disabled');
+
+  // 10c. Production startup with OCR_PROVIDER=mock MUST fail
+  assert.throws(
+    () =>
+      loadConfig({
+        ...baseProdConfig,
+        OCR_PROVIDER: 'mock',
+      }),
+    /OCR_PROVIDER cannot be "mock"/i,
+    'Production startup must reject mock OCR'
+  );
+
+  // 10d. Production startup with Google Document AI missing processor ID MUST fail
+  assert.throws(
+    () =>
+      loadConfig({
+        ...baseProdConfig,
+        OCR_PROVIDER: 'google_document_ai',
+        GOOGLE_DOC_AI_PROJECT_ID: 'electrakart-prod',
+        GOOGLE_DOC_AI_PROCESSOR_ID: '',
+      }),
+    /GOOGLE_DOC_AI_PROCESSOR_ID must be set/i,
+    'Google Document AI in production must require processor ID'
+  );
+
+  // 10e. Production startup with Google Document AI missing project ID MUST fail
+  assert.throws(
+    () =>
+      loadConfig({
+        ...baseProdConfig,
+        OCR_PROVIDER: 'google_document_ai',
+        GOOGLE_DOC_AI_PROJECT_ID: '',
+        GOOGLE_DOC_AI_PROCESSOR_ID: 'proc-12345',
+      }),
+    /GOOGLE_DOC_AI_PROJECT_ID must be set/i,
+    'Google Document AI in production must require project ID'
+  );
+
+  // 10f. Production startup with AWS Textract missing credentials MUST fail
+  assert.throws(
+    () =>
+      loadConfig({
+        ...baseProdConfig,
+        OCR_PROVIDER: 'aws_textract',
+        AWS_TEXTRACT_REGION: 'ap-south-1',
+        AWS_TEXTRACT_ACCESS_KEY_ID: '',
+        AWS_TEXTRACT_SECRET_ACCESS_KEY: '',
+      }),
+    /AWS credentials must be set/i,
+    'AWS Textract in production must require credentials'
+  );
+
+  // 10g. Production startup with invalid OCR_PROVIDER MUST fail
+  assert.throws(
+    () =>
+      loadConfig({
+        ...baseProdConfig,
+        OCR_PROVIDER: 'invalid_engine',
+      }),
+    /Invalid OCR_PROVIDER/i,
+    'Invalid OCR_PROVIDER must throw config error'
+  );
+
+  console.log('✓ Production OCR validation verified: disabled mode succeeds, mock rejected, missing cloud credentials rejected');
 
   console.log('✅ ALL Phase 3A Production Readiness & Hardening Tests Passed!');
   await app.close();

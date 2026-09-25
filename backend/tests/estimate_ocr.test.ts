@@ -9,7 +9,8 @@ import { runMigrations } from '../src/db/migrate.js';
 import { seedDatabase } from '../src/db/seed.js';
 import { validateEstimateFile } from '../src/modules/estimates/fileValidator.js';
 import { normalizeOcrText, extractLineItem } from '../src/modules/estimates/normalizer.js';
-import { getOcrProvider } from '../src/modules/estimates/ocr.provider.js';
+import { getOcrProvider, resetOcrProviderCache } from '../src/modules/estimates/ocr.provider.js';
+import { config } from '../src/config/environment.js';
 
 export async function runEstimateOcrTests() {
   console.log('\n--- Running Phase 3D: Real Estimate OCR & Intelligent Product Matching Tests ---');
@@ -429,6 +430,57 @@ export async function runEstimateOcrTests() {
   );
 
   console.log('✓ IDOR ownership enforced (403), zero financial leakage confirmed, and production mock guard verified');
+
+  // =========================================================================
+  // TEST SUITE 13: Disabled OCR Mode (Production Safe Without Cloud OCR)
+  // =========================================================================
+  console.log('13. Verifying Disabled OCR Mode & Non-Configured Response...');
+
+  // 13a. Direct DisabledOcrProvider verification (never returns fake results)
+  const disabledProvider = getOcrProvider('disabled');
+  await assert.rejects(
+    async () => {
+      await disabledProvider.extractText(Buffer.from('%PDF-1.4 test'), 'application/pdf', 'bill.pdf');
+    },
+    (err: any) => {
+      assert.strictEqual(err.statusCode, 503);
+      assert.strictEqual(err.code, 'OCR_NOT_CONFIGURED');
+      assert.match(err.message, /OCR service is not configured/i);
+      return true;
+    },
+    'Disabled OCR provider must throw 503 without fake results'
+  );
+  console.log('✓ Disabled OCR provider throws 503 and refuses to return fake OCR results');
+
+  // 13b. Endpoint receives clear RFC7807 OCR-not-configured error when OCR is disabled
+  const prevOcrProvider = config.ocrProvider;
+  try {
+    (config as any).ocrProvider = 'disabled';
+    resetOcrProviderCache();
+
+    const disabledUploadRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/estimates/upload',
+      headers: { authorization: `Bearer ${customerToken}` },
+      payload: {
+        filename: 'contractor_estimate.pdf',
+        fileBase64: Buffer.from('%PDF-1.4 sample content').toString('base64'),
+        mimeType: 'application/pdf',
+      },
+    });
+
+    assert.strictEqual(disabledUploadRes.statusCode, 503, 'Disabled OCR upload must return 503');
+    const disabledJson = disabledUploadRes.json();
+    assert.strictEqual(disabledJson.type, 'https://api.electrakart.com/errors/ocr-not-configured');
+    assert.strictEqual(disabledJson.title, 'OCR Service Not Configured');
+    assert.strictEqual(disabledJson.status, 503);
+    assert.match(disabledJson.detail, /OCR service is not configured/i);
+    assert.strictEqual(disabledJson.instance, '/api/v1/estimates/upload');
+    console.log('✓ Estimate upload receives structured RFC7807 503 response when OCR is disabled');
+  } finally {
+    (config as any).ocrProvider = prevOcrProvider;
+    resetOcrProviderCache();
+  }
 
   console.log('\n✅ ALL Phase 3D Estimate OCR & Intelligent Product Matching Tests Passed (100% SUCCESS)!\n');
 }

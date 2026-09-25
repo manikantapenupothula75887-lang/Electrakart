@@ -63,7 +63,7 @@ services:
       - key: RAZORPAY_WEBHOOK_SECRET
         sync: false
       - key: OCR_PROVIDER
-        value: google_document_ai
+        value: disabled
       - key: GOOGLE_DOC_AI_PROJECT_ID
         sync: false
       - key: GOOGLE_DOC_AI_LOCATION

@@ -746,8 +746,7 @@ export async function runNotificationCommunicationTests() {
     PAYMENT_PROVIDER: 'razorpay',
     RAZORPAY_KEY_ID: 'rzp_live_12345',
     RAZORPAY_KEY_SECRET: 'secret12345',
-    OCR_PROVIDER: 'google_document_ai',
-    GOOGLE_DOC_AI_PROCESSOR_ID: 'proc-123',
+    OCR_PROVIDER: 'disabled',
     MAPS_PROVIDER: 'google_maps',
     GOOGLE_MAPS_API_KEY: 'AIzaSyFakeKeyForMaps123',
   };

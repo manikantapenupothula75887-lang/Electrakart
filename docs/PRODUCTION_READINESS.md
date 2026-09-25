@@ -74,11 +74,11 @@ RAZORPAY_KEY_ID=rzp_live_xxxxxxxxxxxxxx
 RAZORPAY_KEY_SECRET=xxxxxxxxxxxxxxxxxxxxxxxx
 RAZORPAY_WEBHOOK_SECRET=xxxxxxxxxxxxxxxxxxxxxxxx
 
-# Document AI / OCR
-OCR_PROVIDER=google_document_ai
-GOOGLE_DOC_AI_PROJECT_ID=electrakart-prod
+# Document AI / OCR (Use 'disabled' when no cloud OCR provider is configured; or 'google_document_ai' / 'aws_textract')
+OCR_PROVIDER=disabled
+GOOGLE_DOC_AI_PROJECT_ID=
 GOOGLE_DOC_AI_LOCATION=us
-GOOGLE_DOC_AI_PROCESSOR_ID=xxxxxxxxxxxxxxxx
+GOOGLE_DOC_AI_PROCESSOR_ID=
 
 # Automated Logistics (Rapido)
 DELIVERY_PROVIDER=rapido

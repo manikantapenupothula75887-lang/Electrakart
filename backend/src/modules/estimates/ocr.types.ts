@@ -35,7 +35,7 @@ export interface ExtractedOcrLine {
 export interface OcrExtractionResult {
   rawText: string;
   lines: ExtractedOcrLine[];
-  provider: 'MOCK' | 'GOOGLE_DOCUMENT_AI' | 'AWS_TEXTRACT';
+  provider: 'MOCK' | 'GOOGLE_DOCUMENT_AI' | 'AWS_TEXTRACT' | 'DISABLED';
   confidenceScore: number;
   metadata?: Record<string, any>;
 }

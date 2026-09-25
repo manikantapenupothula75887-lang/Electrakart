@@ -326,8 +326,7 @@ export async function runLocationFulfillmentTests() {
         PAYMENT_PROVIDER: 'razorpay',
         RAZORPAY_KEY_ID: 'rzp_live_123',
         RAZORPAY_KEY_SECRET: 'rzp_secret_123',
-        OCR_PROVIDER: 'google_document_ai',
-        GOOGLE_DOC_AI_PROCESSOR_ID: 'proc-123',
+        OCR_PROVIDER: 'disabled',
       });
     },
     /MAPS_PROVIDER cannot be "mock"/i,

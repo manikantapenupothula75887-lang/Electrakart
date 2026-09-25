@@ -37,7 +37,7 @@ export interface Config {
   cashfreeAppId: string;
   cashfreeSecretKey: string;
   cashfreeApiVersion: string;
-  ocrProvider: 'mock' | 'google_document_ai' | 'aws_textract';
+  ocrProvider: 'mock' | 'google_document_ai' | 'aws_textract' | 'disabled';
   googleDocAiProjectId: string;
   googleDocAiLocation: string;
   googleDocAiProcessorId: string;
@@ -158,14 +158,21 @@ export function getValidatedConfig(customEnv?: NodeJS.ProcessEnv): Config {
   const cashfreeSecretKey = env.CASHFREE_SECRET_KEY || '';
   const cashfreeApiVersion = env.CASHFREE_API_VERSION || '2023-08-01';
 
-  const ocrProvider = (env.OCR_PROVIDER || (isProd ? 'google_document_ai' : 'mock')).toLowerCase() as
+  const ocrProvider = (env.OCR_PROVIDER || (isProd ? 'disabled' : 'mock')).toLowerCase() as
     | 'mock'
     | 'google_document_ai'
-    | 'aws_textract';
+    | 'aws_textract'
+    | 'disabled';
+
+  if (!['mock', 'google_document_ai', 'aws_textract', 'disabled'].includes(ocrProvider)) {
+    throw new Error(
+      `[Config Error] Invalid OCR_PROVIDER "${env.OCR_PROVIDER}". Valid options are: disabled, google_document_ai, aws_textract (or mock in development).`
+    );
+  }
 
   if (isProd && (ocrProvider === 'mock' || env.OCR_PROVIDER === 'mock')) {
     throw new Error(
-      '[Config Error] In production, OCR_PROVIDER cannot be "mock". A real OCR provider (e.g. google_document_ai or aws_textract) must be configured. Startup aborted.'
+      '[Config Error] In production, OCR_PROVIDER cannot be "mock". A real OCR provider (e.g. google_document_ai or aws_textract) must be configured, or set OCR_PROVIDER=disabled. Startup aborted.'
     );
   }
 
@@ -176,10 +183,17 @@ export function getValidatedConfig(customEnv?: NodeJS.ProcessEnv): Config {
   const awsTextractAccessKeyId = env.AWS_TEXTRACT_ACCESS_KEY_ID || env.AWS_ACCESS_KEY_ID || '';
   const awsTextractSecretAccessKey = env.AWS_TEXTRACT_SECRET_ACCESS_KEY || env.AWS_SECRET_ACCESS_KEY || '';
 
-  if (isProd && ocrProvider === 'google_document_ai' && !googleDocAiProcessorId) {
-    throw new Error(
-      '[Config Error] In production with OCR_PROVIDER=google_document_ai, GOOGLE_DOC_AI_PROCESSOR_ID must be set. Startup aborted.'
-    );
+  if (isProd && ocrProvider === 'google_document_ai') {
+    if (!googleDocAiProjectId) {
+      throw new Error(
+        '[Config Error] In production with OCR_PROVIDER=google_document_ai, GOOGLE_DOC_AI_PROJECT_ID must be set. Startup aborted.'
+      );
+    }
+    if (!googleDocAiProcessorId) {
+      throw new Error(
+        '[Config Error] In production with OCR_PROVIDER=google_document_ai, GOOGLE_DOC_AI_PROCESSOR_ID must be set. Startup aborted.'
+      );
+    }
   }
 
   if (isProd && ocrProvider === 'aws_textract' && (!awsTextractAccessKeyId || !awsTextractSecretAccessKey)) {

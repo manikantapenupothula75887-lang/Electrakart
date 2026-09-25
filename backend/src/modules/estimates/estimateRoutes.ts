@@ -53,8 +53,8 @@ export async function estimateRoutes(fastify: FastifyInstance) {
     } catch (err: any) {
       const status = err.statusCode || 500;
       return reply.status(status).send({
-        type: 'https://api.electrakart.com/errors/estimate-processing-failed',
-        title: 'Estimate Processing Failed',
+        type: err.type || 'https://api.electrakart.com/errors/estimate-processing-failed',
+        title: err.title || 'Estimate Processing Failed',
         status,
         detail: err.message,
         instance: request.url,
