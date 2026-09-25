@@ -71,7 +71,7 @@ services:
       - key: GOOGLE_DOC_AI_PROCESSOR_ID
         sync: false
       - key: MAPS_PROVIDER
-        value: google_maps
+        value: disabled
       - key: GOOGLE_MAPS_API_KEY
         sync: false
 

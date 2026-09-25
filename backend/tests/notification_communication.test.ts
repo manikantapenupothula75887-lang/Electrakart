@@ -747,8 +747,7 @@ export async function runNotificationCommunicationTests() {
     RAZORPAY_KEY_ID: 'rzp_live_12345',
     RAZORPAY_KEY_SECRET: 'secret12345',
     OCR_PROVIDER: 'disabled',
-    MAPS_PROVIDER: 'google_maps',
-    GOOGLE_MAPS_API_KEY: 'AIzaSyFakeKeyForMaps123',
+    MAPS_PROVIDER: 'disabled',
   };
 
   // 1. Production with EMAIL_PROVIDER=mock must throw

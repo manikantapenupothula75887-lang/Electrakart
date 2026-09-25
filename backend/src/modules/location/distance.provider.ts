@@ -129,13 +129,42 @@ export class GoogleRoutesDistanceProvider implements IDistanceProvider {
   }
 }
 
+export class DisabledDistanceProvider implements IDistanceProvider {
+  name = 'disabled';
+
+  async calculateDistance(
+    origin: LocationCoordinates,
+    destination: LocationCoordinates
+  ): Promise<DistanceResult> {
+    const straightLine = calculateHaversineDistanceKm(
+      origin.latitude,
+      origin.longitude,
+      destination.latitude,
+      destination.longitude
+    );
+
+    return {
+      distance_km: straightLine,
+      duration_minutes: 0,
+      provider: 'geodesic_haversine',
+      mode: 'GEODESIC_FALLBACK',
+      is_fallback: true,
+      calculated_at: new Date().toISOString(),
+    };
+  }
+}
+
 export function getDistanceProvider(overrideProvider?: string): IDistanceProvider {
-  const providerType = (overrideProvider || config.mapsProvider || 'mock').toLowerCase();
+  const providerType = (overrideProvider || config.mapsProvider || (config.isProduction ? 'disabled' : 'mock')).toLowerCase();
 
   if (config.isProduction && (providerType === 'mock' || process.env.MAPS_PROVIDER === 'mock')) {
     throw new Error(
-      '[Config Error] In production, MAPS_PROVIDER cannot be "mock". A real maps/distance provider must be configured.'
+      '[Config Error] In production, MAPS_PROVIDER cannot be "mock". A real maps/distance provider (e.g. google_maps or mapbox) must be configured, or set MAPS_PROVIDER=disabled.'
     );
+  }
+
+  if (providerType === 'disabled') {
+    return new DisabledDistanceProvider();
   }
 
   if (providerType === 'google_maps') {

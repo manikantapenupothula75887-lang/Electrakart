@@ -2,6 +2,8 @@ import assert from 'assert';
 import { buildApp } from '../src/app.js';
 import { db } from '../src/db/connection.js';
 import { loadConfig } from '../src/config/environment.js';
+import { DisabledDistanceProvider, calculateHaversineDistanceKm } from '../src/modules/location/distance.provider.js';
+import { DisabledGeocodingProvider } from '../src/modules/location/geocoding.provider.js';
 
 export async function runProductionReadinessTests() {
   console.log('\n--- Running Phase 3A Production Readiness & Hardening Tests ---');
@@ -305,6 +307,104 @@ export async function runProductionReadinessTests() {
   );
 
   console.log('✓ Production OCR validation verified: disabled mode succeeds, mock rejected, missing cloud credentials rejected');
+
+  // Test 11: Production Maps Configuration Validation & Disabled Maps Mode
+  console.log('11. Verifying Production Maps Configuration & Disabled Mode...');
+
+  const baseProdMapsConfig = {
+    NODE_ENV: 'production',
+    DATABASE_URL: 'postgresql://prod_user:prod_pass@localhost:5432/electrakart',
+    JWT_SECRET: 'a_very_secure_high_entropy_random_jwt_secret_key_12345',
+    PAYMENT_PROVIDER: 'razorpay',
+    RAZORPAY_KEY_ID: 'rzp_live_12345',
+    RAZORPAY_KEY_SECRET: 'secret12345',
+  };
+
+  // 11a. Production startup with MAPS_PROVIDER=disabled MUST succeed without Google Maps API key
+  const disabledMapsConfig = loadConfig({
+    ...baseProdMapsConfig,
+    MAPS_PROVIDER: 'disabled',
+  });
+  assert.strictEqual(disabledMapsConfig.mapsProvider, 'disabled', 'MAPS_PROVIDER=disabled must be accepted in production');
+
+  // 11b. Production startup with default MAPS_PROVIDER (unset) defaults to disabled and succeeds
+  const defaultMapsConfig = loadConfig({
+    ...baseProdMapsConfig,
+  });
+  assert.strictEqual(defaultMapsConfig.mapsProvider, 'disabled', 'Unset MAPS_PROVIDER in production must default to disabled');
+
+  // 11c. Production startup with MAPS_PROVIDER=mock MUST fail
+  assert.throws(
+    () =>
+      loadConfig({
+        ...baseProdMapsConfig,
+        MAPS_PROVIDER: 'mock',
+      }),
+    /MAPS_PROVIDER cannot be "mock"/i,
+    'Production startup must reject mock Maps provider'
+  );
+
+  // 11d. Production startup with MAPS_PROVIDER=google_maps missing GOOGLE_MAPS_API_KEY MUST fail
+  assert.throws(
+    () =>
+      loadConfig({
+        ...baseProdMapsConfig,
+        MAPS_PROVIDER: 'google_maps',
+        GOOGLE_MAPS_API_KEY: '',
+      }),
+    /GOOGLE_MAPS_API_KEY must be set/i,
+    'Google Maps in production must require GOOGLE_MAPS_API_KEY'
+  );
+
+  // 11e. Production startup with MAPS_PROVIDER=mapbox missing MAPBOX_ACCESS_TOKEN MUST fail
+  assert.throws(
+    () =>
+      loadConfig({
+        ...baseProdMapsConfig,
+        MAPS_PROVIDER: 'mapbox',
+        MAPBOX_ACCESS_TOKEN: '',
+      }),
+    /MAPBOX_ACCESS_TOKEN must be set/i,
+    'Mapbox in production must require MAPBOX_ACCESS_TOKEN'
+  );
+
+  // 11f. Production startup with invalid MAPS_PROVIDER MUST fail
+  assert.throws(
+    () =>
+      loadConfig({
+        ...baseProdMapsConfig,
+        MAPS_PROVIDER: 'apple_maps',
+      }),
+    /Invalid MAPS_PROVIDER/i,
+    'Invalid MAPS_PROVIDER must throw config error'
+  );
+
+  // 11g. Verify DisabledDistanceProvider calculates accurate Haversine geodesic distance with fallback flags
+  const disabledDistProv = new DisabledDistanceProvider();
+  const origin = { latitude: 16.5167, longitude: 80.6333 }; // Vijayawada
+  const destination = { latitude: 16.3067, longitude: 80.4365 }; // Guntur
+  const expectedStraight = calculateHaversineDistanceKm(
+    origin.latitude,
+    origin.longitude,
+    destination.latitude,
+    destination.longitude
+  );
+  const distResult = await disabledDistProv.calculateDistance(origin, destination);
+  assert.strictEqual(distResult.distance_km, expectedStraight, 'Distance must match Haversine calculation');
+  assert.strictEqual(distResult.duration_minutes, 0, 'Disabled mode duration must be 0 (no fabricated ETA)');
+  assert.strictEqual(distResult.provider, 'geodesic_haversine', 'Provider name must be geodesic_haversine');
+  assert.strictEqual(distResult.mode, 'GEODESIC_FALLBACK', 'Mode must be GEODESIC_FALLBACK');
+  assert.strictEqual(distResult.is_fallback, true, 'is_fallback must be true');
+
+  // 11h. Verify DisabledGeocodingProvider returns valid fallback geocoding
+  const disabledGeoProv = new DisabledGeocodingProvider();
+  const geoResult = await disabledGeoProv.geocode('520002');
+  assert.strictEqual(geoResult.pincode, '520002');
+  assert.strictEqual(geoResult.city, 'Vijayawada');
+  assert.strictEqual(geoResult.provider, 'disabled');
+  assert.strictEqual(geoResult.is_fallback, true);
+
+  console.log('✓ Production Maps validation verified: disabled mode succeeds, mock rejected, missing API keys rejected, geodesic fallback verified');
 
   console.log('✅ ALL Phase 3A Production Readiness & Hardening Tests Passed!');
   await app.close();

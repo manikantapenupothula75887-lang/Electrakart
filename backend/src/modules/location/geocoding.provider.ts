@@ -279,13 +279,131 @@ export class GoogleMapsGeocodingProvider implements IGeocodingProvider {
   }
 }
 
+export class DisabledGeocodingProvider implements IGeocodingProvider {
+  name = 'disabled';
+
+  async geocode(query: string): Promise<GeocodingResult> {
+    const qLower = query.toLowerCase();
+
+    // Check pincode matches
+    const pincodeMatch = query.match(/\b(5\d{5})\b/);
+    if (pincodeMatch && KNOWN_LOCATIONS[pincodeMatch[1]]) {
+      const loc = KNOWN_LOCATIONS[pincodeMatch[1]];
+      return {
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        formatted_address: query,
+        city: loc.city,
+        state: loc.state,
+        pincode: loc.pincode,
+        confidence: 0.85,
+        provider: 'disabled',
+        is_fallback: true,
+      };
+    }
+
+    // Check city/locality names
+    if (qLower.includes('guntur')) {
+      const loc = KNOWN_LOCATIONS['522002'];
+      return {
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        formatted_address: query,
+        city: loc.city,
+        state: loc.state,
+        pincode: loc.pincode,
+        confidence: 0.80,
+        provider: 'disabled',
+        is_fallback: true,
+      };
+    }
+
+    if (qLower.includes('hyderabad') || qLower.includes('sanathnagar')) {
+      const loc = KNOWN_LOCATIONS['500018'];
+      return {
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        formatted_address: query,
+        city: loc.city,
+        state: loc.state,
+        pincode: loc.pincode,
+        confidence: 0.80,
+        provider: 'disabled',
+        is_fallback: true,
+      };
+    }
+
+    if (qLower.includes('visakhapatnam') || qLower.includes('vizag') || qLower.includes('gajuwaka')) {
+      const loc = KNOWN_LOCATIONS['530012'];
+      return {
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        formatted_address: query,
+        city: loc.city,
+        state: loc.state,
+        pincode: loc.pincode,
+        confidence: 0.80,
+        provider: 'disabled',
+        is_fallback: true,
+      };
+    }
+
+    // Default to Vijayawada Governorpet fallback
+    const loc = KNOWN_LOCATIONS['520002'];
+    return {
+      latitude: loc.latitude,
+      longitude: loc.longitude,
+      formatted_address: query,
+      city: loc.city,
+      state: loc.state,
+      pincode: loc.pincode,
+      confidence: 0.60,
+      provider: 'disabled',
+      is_fallback: true,
+    };
+  }
+
+  async reverseGeocode(coords: LocationCoordinates): Promise<GeocodingResult> {
+    // Find closest known location
+    let closestKey = '520002';
+    let minDistanceSq = Number.MAX_VALUE;
+
+    for (const [pin, loc] of Object.entries(KNOWN_LOCATIONS)) {
+      const dLat = loc.latitude - coords.latitude;
+      const dLng = loc.longitude - coords.longitude;
+      const distSq = dLat * dLat + dLng * dLng;
+      if (distSq < minDistanceSq) {
+        minDistanceSq = distSq;
+        closestKey = pin;
+      }
+    }
+
+    const loc = KNOWN_LOCATIONS[closestKey];
+    return {
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      formatted_address: `${loc.city}, ${loc.state} ${loc.pincode}`,
+      city: loc.city,
+      state: loc.state,
+      pincode: loc.pincode,
+      confidence: 0.80,
+      provider: 'disabled',
+      is_fallback: true,
+    };
+  }
+}
+
 export function getGeocodingProvider(overrideProvider?: string): IGeocodingProvider {
-  const providerType = (overrideProvider || config.mapsProvider || 'mock').toLowerCase();
+  const providerType = (overrideProvider || config.mapsProvider || (config.isProduction ? 'disabled' : 'mock')).toLowerCase();
 
   if (config.isProduction && (providerType === 'mock' || process.env.MAPS_PROVIDER === 'mock')) {
     throw new Error(
-      '[Config Error] In production, MAPS_PROVIDER cannot be "mock". A real maps provider must be configured.'
+      '[Config Error] In production, MAPS_PROVIDER cannot be "mock". A real maps provider must be configured, or set MAPS_PROVIDER=disabled.'
     );
+  }
+
+  if (providerType === 'disabled') {
+    return new DisabledGeocodingProvider();
   }
 
   if (providerType === 'google_maps') {

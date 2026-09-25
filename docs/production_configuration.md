@@ -90,12 +90,12 @@ Every external provider is classified below as either **OPTIONAL** or **REQUIRED
     - `AWS_TEXTRACT_SECRET_ACCESS_KEY`: AWS IAM secret access key.
 
 ### 4.3 Maps & Geospatial Routing
-- **Classification:** `REQUIRED FOR PRECISE DISTANCE MATRIX & LIVE ROUTING`
-- **Supported Providers:** `google_maps` | `mapbox` (Value `mock` will abort production startup)
+- **Classification:** `OPTIONAL EXTERNAL INTEGRATION` (Defaults to `disabled` in production)
+- **Supported Providers:** `disabled` | `google_maps` | `mapbox` (Value `mock` will abort production startup)
 - **Configuration Variables:**
-  - `MAPS_PROVIDER`: Set to `google_maps` or `mapbox`.
-  - `GOOGLE_MAPS_API_KEY`: Live Google Maps Platform API key (restricted to backend server IP).
-  - `MAPBOX_ACCESS_TOKEN`: Live Mapbox public/secret token.
+  - `MAPS_PROVIDER`: Set to `disabled`, `google_maps`, or `mapbox`. When `disabled`, distances are computed using transparent mathematical Haversine geodesic calculations (`mode: 'GEODESIC_FALLBACK'`, `is_fallback: true`) without external API calls or billing.
+  - `GOOGLE_MAPS_API_KEY`: Live Google Maps Platform API key (strictly required only when `MAPS_PROVIDER=google_maps`).
+  - `MAPBOX_ACCESS_TOKEN`: Live Mapbox public/secret token (strictly required only when `MAPS_PROVIDER=mapbox`).
 
 ### 4.4 Transactional Email Notifications
 - **Classification:** `REQUIRED FOR ORDER INVOICES & EMAIL ALERTS`

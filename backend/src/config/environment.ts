@@ -44,7 +44,7 @@ export interface Config {
   awsTextractRegion: string;
   awsTextractAccessKeyId: string;
   awsTextractSecretAccessKey: string;
-  mapsProvider: 'mock' | 'google_maps' | 'mapbox';
+  mapsProvider: 'mock' | 'google_maps' | 'mapbox' | 'disabled';
   googleMapsApiKey: string;
   mapboxAccessToken: string;
   emailEnabled: boolean;
@@ -202,14 +202,21 @@ export function getValidatedConfig(customEnv?: NodeJS.ProcessEnv): Config {
     );
   }
 
-  const mapsProvider = (env.MAPS_PROVIDER || (isProd ? 'google_maps' : 'mock')).toLowerCase() as
+  const mapsProvider = (env.MAPS_PROVIDER || (isProd ? 'disabled' : 'mock')).toLowerCase() as
     | 'mock'
     | 'google_maps'
-    | 'mapbox';
+    | 'mapbox'
+    | 'disabled';
+
+  if (!['mock', 'google_maps', 'mapbox', 'disabled'].includes(mapsProvider)) {
+    throw new Error(
+      `[Config Error] Invalid MAPS_PROVIDER "${env.MAPS_PROVIDER}". Valid options are: disabled, google_maps, mapbox (or mock in development).`
+    );
+  }
 
   if (isProd && (mapsProvider === 'mock' || env.MAPS_PROVIDER === 'mock')) {
     throw new Error(
-      '[Config Error] In production, MAPS_PROVIDER cannot be "mock". A real maps/distance provider (e.g. google_maps or mapbox) must be configured. Startup aborted.'
+      '[Config Error] In production, MAPS_PROVIDER cannot be "mock". A real maps/distance provider (e.g. google_maps or mapbox) must be configured, or set MAPS_PROVIDER=disabled. Startup aborted.'
     );
   }
 
