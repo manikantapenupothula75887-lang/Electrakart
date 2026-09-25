@@ -3,7 +3,7 @@ import { FastifyReply, FastifyRequest } from 'fastify';
 export interface AuthUser {
   id: string;
   email: string;
-  role: 'CUSTOMER' | 'RETAILER' | 'DISTRIBUTOR' | 'ADMIN';
+  role: 'CUSTOMER' | 'RETAILER' | 'DISTRIBUTOR' | 'ADMIN' | 'ELECTRICIAN';
   partnerId?: string;
   fullName: string;
 }

@@ -11,6 +11,7 @@ import {
   Package,
   Layers,
   ArrowRight,
+  Wrench,
 } from 'lucide-react';
 import { ElectraKartLogo } from '../common/ElectraKartLogo';
 import { NotificationBell } from '../common/NotificationBell';
@@ -149,6 +150,16 @@ export const CustomerNavbar: React.FC = () => {
               </div>
             )}
           </div>
+
+          {/* Find Electrician CTA */}
+          <Link
+            to="/customer/electricians"
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-800 hover:text-amber-700 hover:bg-amber-50 rounded-xl border border-slate-200 hover:border-amber-300 transition-all"
+          >
+            <Wrench className="w-3.5 h-3.5 text-amber-500" />
+            <span className="hidden md:inline">Find Electrician</span>
+            <span className="md:hidden">Electrician</span>
+          </Link>
 
           {/* Upload Estimate Primary CTA */}
           <Link

@@ -40,6 +40,14 @@ import { AdminProductMasterPage } from './pages/admin/AdminProductMasterPage';
 import { AdminPartnersPage } from './pages/admin/AdminPartnersPage';
 import { AdminOrdersPage } from './pages/admin/AdminOrdersPage';
 import { AdminFinancePage } from './pages/admin/AdminFinancePage';
+import { AdminElectriciansPage } from './pages/admin/AdminElectriciansPage';
+import { AdminDeliveriesPage } from './pages/admin/AdminDeliveriesPage';
+
+// Electrician Pages & Layout
+import { ElectricianLayout } from './components/layout/ElectricianLayout';
+import { ElectricianDashboard } from './pages/electrician/ElectricianDashboard';
+import { ElectricianRegisterPage } from './pages/electrician/ElectricianRegisterPage';
+import { FindElectricianPage } from './pages/customer/FindElectricianPage';
 
 // Common / Auth
 import { LoginPage } from './pages/auth/LoginPage';
@@ -66,9 +74,19 @@ export function App() {
             <Route path="/customer/orders" element={<OrdersHistoryPage />} />
             <Route path="/customer/orders/:id" element={<OrderTrackingPage />} />
             <Route path="/customer/account" element={<AccountPage />} />
+            <Route path="/customer/electricians" element={<FindElectricianPage />} />
 
-            {/* Public Partner Registration */}
+            {/* Public Partner & Electrician Registration */}
             <Route path="/partner/register" element={<BecomePartnerPage />} />
+            <Route path="/electrician/register" element={<ElectricianRegisterPage />} />
+          </Route>
+
+          {/* Electrician Portal */}
+          <Route path="/electrician" element={<ElectricianLayout />}>
+            <Route index element={<ElectricianDashboard />} />
+            <Route path="history" element={<ElectricianDashboard />} />
+            <Route path="profile" element={<ElectricianDashboard />} />
+            <Route path="account" element={<AccountPage />} />
           </Route>
 
           {/* Retailer Portal */}
@@ -94,6 +112,8 @@ export function App() {
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<AdminDashboard />} />
             <Route path="partners" element={<AdminPartnersPage />} />
+            <Route path="electricians" element={<AdminElectriciansPage />} />
+            <Route path="deliveries" element={<AdminDeliveriesPage />} />
             <Route path="products" element={<AdminProductMasterPage />} />
             <Route path="inventory" element={<DistributorInventoryPage />} />
             <Route path="orders" element={<AdminOrdersPage />} />

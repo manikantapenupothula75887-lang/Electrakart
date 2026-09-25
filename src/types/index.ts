@@ -1,6 +1,6 @@
 // ElectraKart Domain Data Models
 
-export type UserRole = 'CUSTOMER' | 'RETAILER' | 'DISTRIBUTOR' | 'ADMIN';
+export type UserRole = 'CUSTOMER' | 'RETAILER' | 'DISTRIBUTOR' | 'ADMIN' | 'ELECTRICIAN';
 
 export type PartnerType = 'RETAILER' | 'DISTRIBUTOR';
 
@@ -288,7 +288,139 @@ export interface MasterCatalogMappingItem {
   submittedAt: string;
 }
 
-// Re-export full canonical domain and security models
 export * from './domain';
 export * from './security';
 
+export type ElectricianSpecialization =
+  | 'WIRING'
+  | 'FANS'
+  | 'LIGHTS'
+  | 'SWITCHES_AND_SOCKETS'
+  | 'SWITCHES_SOCKETS'
+  | 'MCB_DB'
+  | 'MCB_DISTRIBUTION_BOARDS'
+  | 'ELECTRICAL_PANELS'
+  | 'INVERTER_UPS'
+  | 'MOTORS'
+  | 'PUMPS'
+  | 'APPLIANCE_INSTALLATION'
+  | 'INSTALLATION'
+  | 'REPAIR'
+  | 'HOME_ELECTRICAL_REPAIRS'
+  | 'MAINTENANCE'
+  | 'SOLAR_INVERTER'
+  | 'SMART_HOME'
+  | 'COMMERCIAL_ELECTRICAL'
+  | 'COMMERCIAL_ELECTRICAL_REPAIRS'
+  | 'INDUSTRIAL_ELECTRICAL'
+  | 'OTHER'
+  | 'OTHER_ELECTRICAL_SERVICES';
+
+export interface ElectricianProfile {
+  id: string;
+  userId: string;
+  fullName: string;
+  phone: string;
+  email?: string;
+  experienceYears: number;
+  serviceRadiusKm: number;
+  city: string;
+  pincode: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+  idProofUrl?: string;
+  licenseUrl?: string;
+  profilePhotoUrl?: string;
+  inspectionFeeInr: number;
+  verificationStatus: 'PENDING_VERIFICATION' | 'APPROVED' | 'REJECTED' | 'SUSPENDED';
+  rejectionReason?: string;
+  isOnline: boolean;
+  isBusy: boolean;
+  ratingAvg: number;
+  ratingCount: number;
+  completedJobsCount: number;
+  specializations: ElectricianSpecialization[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ElectricianServiceRequest {
+  id: string;
+  requestNumber: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
+  category: ElectricianSpecialization;
+  description: string;
+  address: string;
+  city: string;
+  pincode: string;
+  latitude: number;
+  longitude: number;
+  preferredTime: string;
+  status:
+    | 'REQUESTED'
+    | 'ACCEPTED'
+    | 'ON_THE_WAY'
+    | 'ARRIVED'
+    | 'WORK_STARTED'
+    | 'COMPLETED'
+    | 'CANCELLED'
+    | 'EXPIRED'
+    | 'REJECTED';
+  assignedElectricianId?: string;
+  electricianName?: string;
+  electricianPhone?: string;
+  inspectionFeeInr: number;
+  totalChargesInr?: number;
+  cancellationReason?: string;
+  cancelledBy?: string;
+  requestedAt: string;
+  acceptedAt?: string;
+  customerNotifiedAt?: string;
+  arrivedAt?: string;
+  workStartedAt?: string;
+  completedAt?: string;
+  cancelledAt?: string;
+}
+
+export interface DeliveryBooking {
+  id: string;
+  orderId: string;
+  fulfillmentId: string;
+  idempotencyKey: string;
+  provider: string;
+  providerBookingId?: string;
+  trackingUrl?: string;
+  status:
+    | 'PENDING'
+    | 'BOOKING_REQUESTED'
+    | 'BOOKED'
+    | 'PICKUP_ASSIGNED'
+    | 'PICKED_UP'
+    | 'IN_TRANSIT'
+    | 'DELIVERED'
+    | 'CANCELLED'
+    | 'FAILED';
+  pickupName: string;
+  pickupPhone: string;
+  pickupAddress: string;
+  pickupCity: string;
+  pickupPincode: string;
+  dropName: string;
+  dropPhone: string;
+  dropAddress: string;
+  dropCity: string;
+  dropPincode: string;
+  distanceKm: number;
+  riderName?: string;
+  riderPhone?: string;
+  riderVehicleNumber?: string;
+  estimatedDeliveryTime?: string;
+  deliveryFeeInr: number;
+  retryCount: number;
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+}

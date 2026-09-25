@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { User, Store, Warehouse, ShieldAlert, ChevronDown, ChevronUp, RefreshCw, Sparkles, MapPin } from 'lucide-react';
+import { User, Store, Warehouse, ShieldAlert, ChevronDown, ChevronUp, RefreshCw, Sparkles, MapPin, Wrench } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { UserRole } from '../../types';
 
@@ -17,6 +17,8 @@ export const DemoRoleSwitcherHUD: React.FC = () => {
       if (!location.pathname.startsWith('/customer') && location.pathname !== '/') {
         navigate('/');
       }
+    } else if (role === 'ELECTRICIAN') {
+      navigate('/electrician');
     } else if (role === 'RETAILER') {
       navigate('/retailer');
     } else if (role === 'DISTRIBUTOR') {
@@ -40,6 +42,13 @@ export const DemoRoleSwitcherHUD: React.FC = () => {
       sub: 'Search, Estimate & Order',
       icon: <User className="w-3.5 h-3.5" />,
       color: 'hover:border-amber-500 text-amber-950',
+    },
+    {
+      role: 'ELECTRICIAN',
+      label: 'Electrician Portal',
+      sub: 'Ramesh Kumar (Certified)',
+      icon: <Wrench className="w-3.5 h-3.5" />,
+      color: 'hover:border-amber-400 text-amber-950',
     },
     {
       role: 'RETAILER',

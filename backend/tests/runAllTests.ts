@@ -10,6 +10,10 @@ import { runLocationFulfillmentTests } from './location_fulfillment.test.js';
 import { runNotificationCommunicationTests } from './notification_communication.test.js';
 import { runBusinessCompletionTests } from './business_completion.test.js';
 import { runFinalAcceptanceAuditTests } from './final_acceptance_audit.test.js';
+import { runElectricianMarketplaceTests } from './electrician_marketplace.test.js';
+import { runAutomatedDeliveryTests } from './automated_delivery.test.js';
+import { runRealtimeTrackingTests } from './realtime_tracking.test.js';
+import { runE2EBusinessFlowTests } from './e2e_business_flow.test.js';
 import { db } from '../src/db/connection.js';
 
 async function run() {
@@ -33,6 +37,10 @@ async function run() {
     await runNotificationCommunicationTests();
     await runBusinessCompletionTests();
     await runFinalAcceptanceAuditTests();
+    await runElectricianMarketplaceTests();
+    await runAutomatedDeliveryTests();
+    await runRealtimeTrackingTests();
+    await runE2EBusinessFlowTests();
 
     console.log('\n====================================================');
     console.log('  🎉 ALL BACKEND TESTS PASSED (100% SUCCESS)');

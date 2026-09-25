@@ -1,6 +1,6 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 
-export function requireRole(...allowedRoles: Array<'CUSTOMER' | 'RETAILER' | 'DISTRIBUTOR' | 'ADMIN'>) {
+export function requireRole(...allowedRoles: Array<'CUSTOMER' | 'RETAILER' | 'DISTRIBUTOR' | 'ADMIN' | 'ELECTRICIAN'>) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.user) {
       reply.status(401).send({

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   Package,
@@ -19,9 +19,12 @@ import {
   AlertTriangle,
   RotateCcw,
   RefreshCw,
+  Download,
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { OrderStatus } from '../../types';
+import { LiveTrackingMap } from '../../components/delivery/LiveTrackingMap';
+import { downloadCustomerInvoicePdf } from '../../utils/pdfGenerator';
 
 export const OrderTrackingPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -35,9 +38,72 @@ export const OrderTrackingPage: React.FC = () => {
   const [cancelReason, setCancelReason] = useState('Changed site requirements / schedule change');
   const [isCancelling, setIsCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [liveTelemetry, setLiveTelemetry] = useState<Record<string, any>>({});
 
   // Find target order or fallback to first
   const order = orders.find((o) => o.id === id || o.orderNumber === id) || orders[0];
+
+  // Real-Time Server-Sent Events (SSE) telemetry connection
+  useEffect(() => {
+    if (!order?.id) return;
+
+    // Fetch initial carrier tracking snapshot
+    fetch(`/api/v1/deliveries/bookings/${order.id}/tracking`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && data.telemetry) {
+          setLiveTelemetry((prev) => ({
+            ...prev,
+            [data.fulfillmentId || 'default']: data,
+          }));
+        }
+      })
+      .catch(() => {});
+
+    // Open persistent SSE channel to order topic
+    const es = new EventSource(`/api/v1/realtime/stream?channel=order:${order.id}`);
+
+    es.addEventListener('DELIVERY_LOCATION_UPDATED', (evt: MessageEvent) => {
+      try {
+        const parsed = JSON.parse(evt.data);
+        const payload = parsed.payload;
+        if (payload) {
+          setLiveTelemetry((prev) => ({
+            ...prev,
+            [payload.fulfillmentId || 'default']: {
+              ...prev[payload.fulfillmentId || 'default'],
+              telemetry: payload,
+              status: 'OUT_FOR_DELIVERY',
+            },
+          }));
+        }
+      } catch (err) {
+        console.error('[SSE Error] Failed to parse location update:', err);
+      }
+    });
+
+    es.addEventListener('DELIVERY_STATUS_CHANGED', (evt: MessageEvent) => {
+      try {
+        const parsed = JSON.parse(evt.data);
+        const payload = parsed.payload;
+        if (payload) {
+          setLiveTelemetry((prev) => ({
+            ...prev,
+            [payload.fulfillmentId || 'default']: {
+              ...prev[payload.fulfillmentId || 'default'],
+              status: payload.status,
+            },
+          }));
+        }
+      } catch (err) {
+        console.error('[SSE Error] Failed to parse status update:', err);
+      }
+    });
+
+    return () => {
+      es.close();
+    };
+  }, [order?.id]);
 
   if (!order) {
     return (
@@ -393,6 +459,57 @@ export const OrderTrackingPage: React.FC = () => {
                   </div>
                 </div>
               </div>
+
+              {/* ZOMATO / SWIGGY STYLE LIVE VEHICLE TRACKING MAP */}
+              {(ful.status === 'DISPATCHED' ||
+                ful.status === 'OUT_FOR_DELIVERY' ||
+                ful.status === 'DELIVERED' ||
+                liveTelemetry[ful.id]?.telemetry) && (
+                <div className="pt-4 border-t border-slate-100">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+                      <Truck className="w-4 h-4 text-amber-500" />
+                      <span>Live Pilot GPS Telemetry & Route Tracking</span>
+                    </span>
+                    <span className="text-[11px] font-mono text-slate-500">
+                      Real-time SSE Stream
+                    </span>
+                  </div>
+
+                  <LiveTrackingMap
+                    pickup={{
+                      name: ful.partnerName,
+                      address: ful.partnerAddress,
+                      latitude: 16.5062,
+                      longitude: 80.648,
+                      type: ful.partnerType,
+                    }}
+                    drop={{
+                      name: order.customerName,
+                      address: order.deliveryAddress,
+                      latitude: 16.515,
+                      longitude: 80.635,
+                    }}
+                    telemetry={
+                      liveTelemetry[ful.id]?.telemetry || {
+                        latitude: 16.5105,
+                        longitude: 80.6415,
+                        distanceRemainingKm: 2.1,
+                        etaMinutes: 11,
+                        heading: 40,
+                        speed: 26,
+                        recordedAt: new Date().toISOString(),
+                      }
+                    }
+                    rider={{
+                      name: ful.driverName || liveTelemetry[ful.id]?.rider?.name || 'Suresh Kumar (Logistics Partner)',
+                      phone: ful.driverPhone || liveTelemetry[ful.id]?.rider?.phone || '+91 98765 43210',
+                      vehicleNumber: liveTelemetry[ful.id]?.rider?.vehicleNumber || 'AP 16 BK 4892',
+                    }}
+                    status={liveTelemetry[ful.id]?.status || ful.status}
+                  />
+                </div>
+              )}
             </div>
           );
         })}
@@ -539,6 +656,36 @@ export const OrderTrackingPage: React.FC = () => {
                 className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors"
               >
                 Close
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!invoiceData || !order) return;
+                  downloadCustomerInvoicePdf({
+                    invoiceNumber: invoiceData.invoiceNumber || `INV-${order.orderNumber}`,
+                    orderNumber: order.orderNumber,
+                    orderDate: invoiceData.date || new Date().toISOString().split('T')[0],
+                    customerName: invoiceData.customerName || order.customerName || 'Customer',
+                    customerPhone: invoiceData.customerPhone || order.customerPhone,
+                    deliveryAddress: order.deliveryAddress,
+                    items: (invoiceData.items || order.fulfillments.flatMap((f) => f.items)).map((it: any) => ({
+                      name: it.productName || it.name || 'Electrical Material',
+                      quantity: it.quantity || 1,
+                      unitPrice: it.unitPrice || it.price || 0,
+                      totalPrice: (it.unitPrice || it.price || 0) * (it.quantity || 1),
+                    })),
+                    subtotal: invoiceData.subtotal || order.subtotal,
+                    gstTotal: invoiceData.taxTotal || order.gstTotal,
+                    deliveryFee: invoiceData.deliveryFee ?? order.deliveryFee,
+                    grandTotal: invoiceData.grandTotal || order.grandTotal,
+                    paymentMethod: invoiceData.paymentMethod || order.paymentMethod || 'Online UPI Payment',
+                    paymentStatus: invoiceData.paymentStatus || order.paymentStatus || 'PAID',
+                  });
+                }}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Download PDF</span>
               </button>
               <button
                 type="button"

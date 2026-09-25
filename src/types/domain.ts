@@ -7,7 +7,7 @@
 // 1. IDENTITY, ROLES & ORGANIZATIONS
 // ============================================================================
 
-export type Role = 'CUSTOMER' | 'RETAILER' | 'DISTRIBUTOR' | 'ADMIN';
+export type Role = 'CUSTOMER' | 'RETAILER' | 'DISTRIBUTOR' | 'ADMIN' | 'ELECTRICIAN';
 
 export type PartnerType = 'RETAILER' | 'DISTRIBUTOR';
 

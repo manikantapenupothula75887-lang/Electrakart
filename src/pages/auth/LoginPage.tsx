@@ -10,6 +10,7 @@ import {
   Lock,
   Mail,
   Zap,
+  Wrench,
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { UserRole } from '../../types';
@@ -32,6 +33,8 @@ export const LoginPage: React.FC = () => {
       setEmail('dispatch@abcdistributors.in');
     } else if (role === 'ADMIN') {
       setEmail('admin@electrakart.in');
+    } else if (role === 'ELECTRICIAN') {
+      setEmail('ramesh.electrician@gmail.com');
     }
   };
 
@@ -41,6 +44,8 @@ export const LoginPage: React.FC = () => {
 
     if (selectedRole === 'CUSTOMER') {
       navigate('/');
+    } else if (selectedRole === 'ELECTRICIAN') {
+      navigate('/electrician');
     } else if (selectedRole === 'RETAILER') {
       navigate('/retailer');
     } else if (selectedRole === 'DISTRIBUTOR') {
@@ -53,6 +58,7 @@ export const LoginPage: React.FC = () => {
   const handleQuickDemoLogin = (role: UserRole) => {
     setUserRole(role);
     if (role === 'CUSTOMER') navigate('/');
+    else if (role === 'ELECTRICIAN') navigate('/electrician');
     else if (role === 'RETAILER') navigate('/retailer');
     else if (role === 'DISTRIBUTOR') navigate('/distributor');
     else if (role === 'ADMIN') navigate('/admin');
@@ -79,9 +85,10 @@ export const LoginPage: React.FC = () => {
             <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-2">
               Select Your Portal Role:
             </label>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
               {[
                 { role: 'CUSTOMER' as UserRole, label: 'Customer', icon: <User className="w-3.5 h-3.5" /> },
+                { role: 'ELECTRICIAN' as UserRole, label: 'Electrician', icon: <Wrench className="w-3.5 h-3.5" /> },
                 { role: 'RETAILER' as UserRole, label: 'Retailer', icon: <Store className="w-3.5 h-3.5" /> },
                 { role: 'DISTRIBUTOR' as UserRole, label: 'Distributor', icon: <Warehouse className="w-3.5 h-3.5" /> },
                 { role: 'ADMIN' as UserRole, label: 'Admin', icon: <ShieldAlert className="w-3.5 h-3.5" /> },
@@ -147,13 +154,20 @@ export const LoginPage: React.FC = () => {
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block text-center">
               Instant 1-Click Reviewer Access:
             </span>
-            <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
               <button
                 type="button"
                 onClick={() => handleQuickDemoLogin('CUSTOMER')}
                 className="p-2.5 rounded-xl bg-slate-100 hover:bg-amber-100 text-slate-800 font-bold text-left transition-colors"
               >
                 👤 Customer (Vijayawada)
+              </button>
+              <button
+                type="button"
+                onClick={() => handleQuickDemoLogin('ELECTRICIAN')}
+                className="p-2.5 rounded-xl bg-slate-100 hover:bg-amber-100 text-slate-800 font-bold text-left transition-colors"
+              >
+                ⚡ Electrician (Ramesh)
               </button>
               <button
                 type="button"
@@ -172,7 +186,7 @@ export const LoginPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => handleQuickDemoLogin('ADMIN')}
-                className="p-2.5 rounded-xl bg-slate-100 hover:bg-rose-100 text-slate-800 font-bold text-left transition-colors"
+                className="p-2.5 rounded-xl bg-slate-100 hover:bg-rose-100 text-slate-800 font-bold text-left transition-colors sm:col-span-2"
               >
                 🛡️ Master Super Admin
               </button>
@@ -180,11 +194,19 @@ export const LoginPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="text-center mt-6 text-xs text-slate-400">
-          Want to become an authorized retail or wholesale dealer?{' '}
-          <Link to="/partner/register" className="text-amber-400 font-bold hover:underline">
-            Register as an ElectraKart Partner
-          </Link>
+        <div className="text-center mt-6 text-xs text-slate-400 space-y-1">
+          <div>
+            Are you a skilled technician?{' '}
+            <Link to="/electrician/register" className="text-amber-400 font-bold hover:underline">
+              Join as an Electrician
+            </Link>
+          </div>
+          <div>
+            Authorized retail or wholesale dealer?{' '}
+            <Link to="/partner/register" className="text-amber-400 font-bold hover:underline">
+              Register as an ElectraKart Partner
+            </Link>
+          </div>
         </div>
       </div>
     </div>

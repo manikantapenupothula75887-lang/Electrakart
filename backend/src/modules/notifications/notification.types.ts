@@ -31,15 +31,27 @@ export type NotificationEventType =
   | 'STOCK_TRANSFER_CREATED'
   | 'STOCK_TRANSFER_COMPLETED'
   | 'PARTNER_KYC_STATUS'
-  | 'ADMIN_ALERT';
+  | 'ADMIN_ALERT'
+  | 'ELECTRICIAN_REQUEST_CREATED'
+  | 'ELECTRICIAN_REQUEST_ACCEPTED'
+  | 'ELECTRICIAN_ON_THE_WAY'
+  | 'ELECTRICIAN_ARRIVED'
+  | 'ELECTRICIAN_WORK_STARTED'
+  | 'ELECTRICIAN_REQUEST_COMPLETED'
+  | 'ELECTRICIAN_REQUEST_CANCELLED'
+  | 'DELIVERY_BOOKED'
+  | 'DELIVERY_PICKED_UP'
+  | 'DELIVERY_OUT_FOR_DELIVERY'
+  | 'DELIVERY_DELIVERED'
+  | 'DELIVERY_FAILED';
 
 export interface NotificationEvent {
   eventType: NotificationEventType;
   userId?: string;
-  role?: 'CUSTOMER' | 'RETAILER' | 'DISTRIBUTOR' | 'ADMIN';
+  role?: 'CUSTOMER' | 'RETAILER' | 'DISTRIBUTOR' | 'ADMIN' | 'ELECTRICIAN';
   title: string;
   message: string;
-  entityType?: 'ORDER' | 'FULFILLMENT' | 'ESTIMATE' | 'QUOTATION' | 'INVENTORY' | 'USER' | 'ADMIN';
+  entityType?: 'ORDER' | 'FULFILLMENT' | 'ESTIMATE' | 'QUOTATION' | 'INVENTORY' | 'USER' | 'ADMIN' | 'ELECTRICIAN_REQUEST' | 'DELIVERY';
   entityId?: string;
   linkActionUrl?: string;
   recipientEmail?: string;

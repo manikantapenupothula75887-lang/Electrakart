@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
     phone_number VARCHAR(20) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     full_name VARCHAR(150) NOT NULL,
-    role VARCHAR(50) NOT NULL CHECK (role IN ('CUSTOMER', 'RETAILER', 'DISTRIBUTOR', 'ADMIN')),
+    role VARCHAR(50) NOT NULL CHECK (role IN ('CUSTOMER', 'RETAILER', 'DISTRIBUTOR', 'ADMIN', 'ELECTRICIAN')),
     city VARCHAR(100) DEFAULT 'Vijayawada',
     pincode VARCHAR(10) DEFAULT '520002',
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -629,3 +629,201 @@ CREATE INDEX IF NOT EXISTS idx_stock_transfers_partner ON stock_transfers(partne
 CREATE INDEX IF NOT EXISTS idx_stock_transfers_src ON stock_transfers(source_warehouse_id);
 CREATE INDEX IF NOT EXISTS idx_stock_transfers_dst ON stock_transfers(destination_warehouse_id);
 
+-- ============================================================================
+-- 9. ELECTRICIAN MARKETPLACE ECOSYSTEM
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS electrician_profiles (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    full_name VARCHAR(150) NOT NULL,
+    phone VARCHAR(20) NOT NULL,
+    email VARCHAR(150),
+    experience_years INT NOT NULL DEFAULT 0,
+    service_radius_km NUMERIC(5, 2) NOT NULL DEFAULT 10.00,
+    city VARCHAR(100) NOT NULL,
+    pincode VARCHAR(10) NOT NULL,
+    address TEXT NOT NULL,
+    latitude NUMERIC(10, 7) NOT NULL,
+    longitude NUMERIC(10, 7) NOT NULL,
+    id_proof_url TEXT,
+    license_url TEXT,
+    profile_photo_url TEXT,
+    inspection_fee_inr NUMERIC(10, 2) NOT NULL DEFAULT 199.00,
+    verification_status VARCHAR(50) NOT NULL DEFAULT 'PENDING_VERIFICATION' CHECK (verification_status IN ('PENDING_VERIFICATION', 'APPROVED', 'REJECTED', 'SUSPENDED')),
+    rejection_reason TEXT,
+    is_online BOOLEAN NOT NULL DEFAULT FALSE,
+    is_busy BOOLEAN NOT NULL DEFAULT FALSE,
+    rating_avg NUMERIC(3, 2) NOT NULL DEFAULT 0.00,
+    rating_count INT NOT NULL DEFAULT 0,
+    completed_jobs_count INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_electrician_profiles_status_online ON electrician_profiles(verification_status, is_online);
+CREATE INDEX IF NOT EXISTS idx_electrician_profiles_coords ON electrician_profiles(latitude, longitude);
+CREATE INDEX IF NOT EXISTS idx_electrician_profiles_user ON electrician_profiles(user_id);
+
+CREATE TABLE IF NOT EXISTS electrician_specializations (
+    id TEXT PRIMARY KEY,
+    electrician_id TEXT NOT NULL REFERENCES electrician_profiles(id) ON DELETE CASCADE,
+    category VARCHAR(100) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_electrician_spec UNIQUE (electrician_id, category)
+);
+
+CREATE INDEX IF NOT EXISTS idx_electrician_spec_cat ON electrician_specializations(category);
+CREATE INDEX IF NOT EXISTS idx_electrician_spec_elec ON electrician_specializations(electrician_id);
+
+CREATE TABLE IF NOT EXISTS electrician_service_requests (
+    id TEXT PRIMARY KEY,
+    request_number VARCHAR(50) UNIQUE NOT NULL,
+    customer_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    customer_name VARCHAR(150) NOT NULL,
+    customer_phone VARCHAR(20) NOT NULL,
+    category VARCHAR(100) NOT NULL,
+    description TEXT NOT NULL,
+    address TEXT NOT NULL,
+    city VARCHAR(100) NOT NULL,
+    pincode VARCHAR(10) NOT NULL,
+    latitude NUMERIC(10, 7) NOT NULL,
+    longitude NUMERIC(10, 7) NOT NULL,
+    preferred_time VARCHAR(50) NOT NULL DEFAULT 'IMMEDIATE',
+    status VARCHAR(50) NOT NULL DEFAULT 'REQUESTED' CHECK (status IN ('REQUESTED', 'ACCEPTED', 'ON_THE_WAY', 'ARRIVED', 'WORK_STARTED', 'COMPLETED', 'CANCELLED', 'EXPIRED', 'REJECTED')),
+    assigned_electrician_id TEXT REFERENCES electrician_profiles(id) ON DELETE SET NULL,
+    inspection_fee_inr NUMERIC(10, 2) NOT NULL DEFAULT 199.00,
+    total_charges_inr NUMERIC(10, 2),
+    cancellation_reason TEXT,
+    cancelled_by VARCHAR(50),
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    accepted_at TIMESTAMPTZ,
+    customer_notified_at TIMESTAMPTZ,
+    arrived_at TIMESTAMPTZ,
+    work_started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    cancelled_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_elec_req_status ON electrician_service_requests(status);
+CREATE INDEX IF NOT EXISTS idx_elec_req_assigned ON electrician_service_requests(assigned_electrician_id);
+CREATE INDEX IF NOT EXISTS idx_elec_req_customer ON electrician_service_requests(customer_id);
+
+CREATE TABLE IF NOT EXISTS electrician_ratings (
+    id TEXT PRIMARY KEY,
+    service_request_id TEXT NOT NULL UNIQUE REFERENCES electrician_service_requests(id) ON DELETE CASCADE,
+    customer_id TEXT NOT NULL REFERENCES users(id),
+    electrician_id TEXT NOT NULL REFERENCES electrician_profiles(id) ON DELETE CASCADE,
+    rating INT NOT NULL CHECK (rating >= 1 AND rating <= 5),
+    review TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_elec_ratings_elec ON electrician_ratings(electrician_id);
+
+-- ============================================================================
+-- 10. AUTOMATED DELIVERY INTEGRATION (RAPIDO & CARRIER ABSTRACTION)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS delivery_bookings (
+    id TEXT PRIMARY KEY,
+    order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    fulfillment_id TEXT NOT NULL REFERENCES order_fulfillments(id) ON DELETE CASCADE,
+    idempotency_key VARCHAR(120) UNIQUE NOT NULL,
+    provider VARCHAR(50) NOT NULL DEFAULT 'rapido',
+    provider_booking_id VARCHAR(100),
+    tracking_url TEXT,
+    status VARCHAR(50) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'BOOKING_REQUESTED', 'BOOKED', 'PICKUP_ASSIGNED', 'PICKED_UP', 'IN_TRANSIT', 'DELIVERED', 'CANCELLED', 'FAILED')),
+    pickup_name VARCHAR(150) NOT NULL,
+    pickup_phone VARCHAR(20) NOT NULL,
+    pickup_address TEXT NOT NULL,
+    pickup_city VARCHAR(100) NOT NULL,
+    pickup_pincode VARCHAR(10) NOT NULL,
+    pickup_latitude NUMERIC(10, 7) NOT NULL,
+    pickup_longitude NUMERIC(10, 7) NOT NULL,
+    drop_name VARCHAR(150) NOT NULL,
+    drop_phone VARCHAR(20) NOT NULL,
+    drop_address TEXT NOT NULL,
+    drop_city VARCHAR(100) NOT NULL,
+    drop_pincode VARCHAR(10) NOT NULL,
+    drop_latitude NUMERIC(10, 7) NOT NULL,
+    drop_longitude NUMERIC(10, 7) NOT NULL,
+    distance_km NUMERIC(6, 2) NOT NULL DEFAULT 0.00,
+    rider_name VARCHAR(150),
+    rider_phone VARCHAR(20),
+    rider_vehicle_number VARCHAR(50),
+    estimated_delivery_time TIMESTAMPTZ,
+    delivery_fee_inr NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    retry_count INT NOT NULL DEFAULT 0,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_delivery_bookings_order ON delivery_bookings(order_id);
+CREATE INDEX IF NOT EXISTS idx_delivery_bookings_ful ON delivery_bookings(fulfillment_id);
+CREATE INDEX IF NOT EXISTS idx_delivery_bookings_status ON delivery_bookings(status);
+CREATE INDEX IF NOT EXISTS idx_delivery_bookings_provider ON delivery_bookings(provider, provider_booking_id);
+
+CREATE TABLE IF NOT EXISTS delivery_status_history (
+    id TEXT PRIMARY KEY,
+    delivery_booking_id TEXT NOT NULL REFERENCES delivery_bookings(id) ON DELETE CASCADE,
+    status VARCHAR(50) NOT NULL,
+    description TEXT,
+    raw_payload JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_delivery_history_booking ON delivery_status_history(delivery_booking_id, created_at DESC);
+
+-- ============================================================================
+-- 11. REAL-TIME TRACKING, TELEMETRY INGESTION & DELIVERY WEBHOOKS
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS electrician_location_updates (
+    id TEXT PRIMARY KEY,
+    electrician_id TEXT NOT NULL REFERENCES electrician_profiles(id) ON DELETE CASCADE,
+    job_id TEXT REFERENCES electrician_service_requests(id) ON DELETE CASCADE,
+    latitude NUMERIC(10, 7) NOT NULL,
+    longitude NUMERIC(10, 7) NOT NULL,
+    accuracy NUMERIC(6, 2),
+    heading NUMERIC(5, 2),
+    speed NUMERIC(5, 2),
+    recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_elec_loc_elec_time ON electrician_location_updates(electrician_id, recorded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_elec_loc_job_time ON electrician_location_updates(job_id, recorded_at DESC);
+
+CREATE TABLE IF NOT EXISTS delivery_location_updates (
+    id TEXT PRIMARY KEY,
+    delivery_booking_id TEXT NOT NULL REFERENCES delivery_bookings(id) ON DELETE CASCADE,
+    driver_name VARCHAR(150),
+    latitude NUMERIC(10, 7) NOT NULL,
+    longitude NUMERIC(10, 7) NOT NULL,
+    accuracy NUMERIC(6, 2),
+    heading NUMERIC(5, 2),
+    speed NUMERIC(5, 2),
+    distance_remaining_km NUMERIC(6, 2),
+    eta_minutes INT,
+    recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_deliv_loc_booking_time ON delivery_location_updates(delivery_booking_id, recorded_at DESC);
+
+CREATE TABLE IF NOT EXISTS delivery_webhooks (
+    id TEXT PRIMARY KEY,
+    provider VARCHAR(50) NOT NULL,
+    provider_event_id VARCHAR(120) NOT NULL,
+    event_type VARCHAR(100) NOT NULL,
+    payload_hash VARCHAR(64) NOT NULL,
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status VARCHAR(50) NOT NULL DEFAULT 'PROCESSED',
+    received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_delivery_webhooks_provider_event UNIQUE (provider, provider_event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_deliv_webhooks_event ON delivery_webhooks(provider, provider_event_id);

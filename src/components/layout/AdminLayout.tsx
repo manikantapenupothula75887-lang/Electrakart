@@ -10,6 +10,8 @@ import {
   TrendingUp,
   Settings,
   Sparkles,
+  Wrench,
+  Truck,
 } from 'lucide-react';
 import { ElectraKartLogo } from '../common/ElectraKartLogo';
 import { DemoRoleSwitcherHUD } from '../common/DemoRoleSwitcherHUD';
@@ -40,6 +42,8 @@ export const AdminLayout: React.FC = () => {
     },
     { label: 'Network Inventory', path: '/admin/inventory', icon: <Boxes className="w-4 h-4" /> },
     { label: 'All Orders', path: '/admin/orders', icon: <ShoppingCart className="w-4 h-4" /> },
+    { label: 'Electricians', path: '/admin/electricians', icon: <Wrench className="w-4 h-4" /> },
+    { label: 'Deliveries', path: '/admin/deliveries', icon: <Truck className="w-4 h-4" /> },
     { label: 'Financials & Margins', path: '/admin/finance', icon: <TrendingUp className="w-4 h-4" /> },
     { label: 'Platform Settings', path: '/admin/settings', icon: <Settings className="w-4 h-4" /> },
   ];

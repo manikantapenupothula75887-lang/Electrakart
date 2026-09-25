@@ -282,6 +282,66 @@ export function renderTemplates(event: NotificationEvent): RenderedTemplates {
       };
     }
 
+    case 'ELECTRICIAN_REQUEST_ACCEPTED': {
+      const elecName = meta.electricianName || 'Verified Electrician';
+      const elecPhone = meta.electricianPhone || '';
+      return {
+        email: {
+          subject: `Electrician Assigned: ${event.entityId} - ElectraKart`,
+          textBody: `Hello ${customerName},\n\nYour service request ${event.entityId} has been accepted by ${elecName} (${elecPhone}). They will arrive shortly.\n\nThank you for choosing ElectraKart.`,
+          htmlBody: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px;">
+              <h2 style="color: #0f172a; margin-top: 0;">Electrician Assigned</h2>
+              <p>Hello <strong>${customerName}</strong>,</p>
+              <p>Your request <strong>#${event.entityId}</strong> has been accepted by verified electrician <strong>${elecName}</strong>.</p>
+              <p>Contact: <strong>${elecPhone}</strong></p>
+              <p style="color: #64748b; font-size: 13px;">Inspection fee is payable directly upon service completion.</p>
+            </div>
+          `,
+        },
+        sms: {
+          text: `ElectraKart: Your electrician ${elecName} (${elecPhone}) has accepted request #${event.entityId} and is on the way.`,
+        },
+        whatsapp: {
+          templateName: 'electrician_assigned',
+          templateParams: {
+            customer_name: customerName,
+            electrician_name: elecName,
+            request_id: String(event.entityId || ''),
+          },
+          messageText: `[Electrician Update] ${elecName} has accepted your service request #${event.entityId}. Phone: ${elecPhone}.`,
+        },
+      };
+    }
+
+    case 'DELIVERY_BOOKED': {
+      const trackingUrl = meta.trackingUrl || 'https://electrakart.in/track';
+      return {
+        email: {
+          subject: `Automated Delivery Booked: Order ${orderId} - ElectraKart`,
+          textBody: `Hello ${customerName},\n\nA local courier (Rapido) has been booked for your order ${orderId}. Track here: ${trackingUrl}`,
+          htmlBody: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px;">
+              <h2 style="color: #0f172a; margin-top: 0;">Courier Booked</h2>
+              <p>Hello <strong>${customerName}</strong>,</p>
+              <p>Your delivery has been booked with our courier partner. Real-time tracking is available at <a href="${trackingUrl}">${trackingUrl}</a>.</p>
+            </div>
+          `,
+        },
+        sms: {
+          text: `ElectraKart: Delivery partner assigned for order ${orderId}. Track: ${trackingUrl}`,
+        },
+        whatsapp: {
+          templateName: 'delivery_booked',
+          templateParams: {
+            order_id: String(orderId),
+            tracking_url: trackingUrl,
+          },
+          messageText: `[Delivery Update] Courier assigned for order ${orderId}. Track live: ${trackingUrl}`,
+        },
+      };
+    }
+
     default: {
       return {
         email: {

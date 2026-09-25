@@ -67,6 +67,12 @@ export interface Config {
   whatsappApiToken: string;
   whatsappPhoneNumberId: string;
   whatsappWebhookSecret: string;
+  deliveryProvider: 'mock' | 'rapido';
+  rapidoApiKey: string;
+  rapidoClientId: string;
+  rapidoClientSecret: string;
+  rapidoBaseUrl: string;
+  rapidoWebhookSecret: string;
 }
 
 const INSECURE_DEV_SECRETS = [
@@ -260,6 +266,15 @@ export function getValidatedConfig(customEnv?: NodeJS.ProcessEnv): Config {
     );
   }
 
+  const deliveryProvider = (env.DELIVERY_PROVIDER || (isProd ? 'rapido' : 'mock')).toLowerCase() as
+    | 'mock'
+    | 'rapido';
+  const rapidoApiKey = env.RAPIDO_API_KEY || '';
+  const rapidoClientId = env.RAPIDO_CLIENT_ID || '';
+  const rapidoClientSecret = env.RAPIDO_CLIENT_SECRET || '';
+  const rapidoBaseUrl = env.RAPIDO_BASE_URL || 'https://api.rapido.bike';
+  const rapidoWebhookSecret = env.RAPIDO_WEBHOOK_SECRET || (isTest ? 'test-rapido-webhook-secret' : '');
+
   return {
     nodeEnv: currentEnv,
     isProduction: isProd,
@@ -320,6 +335,12 @@ export function getValidatedConfig(customEnv?: NodeJS.ProcessEnv): Config {
     whatsappApiToken,
     whatsappPhoneNumberId,
     whatsappWebhookSecret,
+    deliveryProvider,
+    rapidoApiKey,
+    rapidoClientId,
+    rapidoClientSecret,
+    rapidoBaseUrl,
+    rapidoWebhookSecret,
   };
 }
 

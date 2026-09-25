@@ -8,6 +8,10 @@ import { FulfillmentCartItem } from '../fulfillment/fulfillment.types.js';
 import { notificationService } from '../notifications/notification.service.js';
 import { auditService } from '../audit/audit.service.js';
 import { inventoryLedgerService } from '../inventory/inventory.ledger.service.js';
+import { DeliveryService } from '../delivery/delivery.service.js';
+import { eventHub } from '../realtime/eventHub.js';
+
+const deliveryService = new DeliveryService();
 
 export async function orderRoutes(fastify: FastifyInstance) {
   // Create unified order with multi-store split fulfillment
@@ -667,7 +671,7 @@ export async function orderRoutes(fastify: FastifyInstance) {
     const { orderId, fulfillmentId } = request.params as any;
     const { status, note, driverName, driverPhone } = (request.body as any) || {};
 
-    const allowedStatuses = ['CONFIRMED', 'PREPARING', 'PACKED', 'DISPATCHED', 'DELIVERED', 'CANCELLED'];
+    const allowedStatuses = ['CONFIRMED', 'PREPARING', 'PACKED', 'DISPATCHED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'];
     if (!status || !allowedStatuses.includes(status)) {
       return reply.status(400).send({
         type: 'https://api.electrakart.com/errors/invalid-status',
@@ -851,6 +855,7 @@ export async function orderRoutes(fastify: FastifyInstance) {
     if (status === 'PREPARING') eventType = 'FULFILLMENT_PREPARING';
     else if (status === 'PACKED') eventType = 'FULFILLMENT_PACKED';
     else if (status === 'DISPATCHED') eventType = 'ORDER_DISPATCHED';
+    else if (status === 'OUT_FOR_DELIVERY') eventType = 'ORDER_OUT_FOR_DELIVERY';
     else if (status === 'DELIVERED') eventType = 'ORDER_DELIVERED';
     else if (status === 'CANCELLED') eventType = 'ORDER_CANCELLED';
 
@@ -876,6 +881,28 @@ export async function orderRoutes(fastify: FastifyInstance) {
         isCriticalTransactional: true,
       })
       .catch((e) => console.error('[Notification Hook Error] FULFILLMENT_STATUS:', e));
+
+    // Broadcast real-time domain event to SSE channel for instant frontend reactivity
+    eventHub.publish(`order:${orderId}`, {
+      eventType: 'FULFILLMENT_STATUS_CHANGED',
+      entityType: 'ORDER',
+      entityId: orderId,
+      payload: {
+        orderId,
+        fulfillmentId,
+        status,
+        driverName,
+        driverPhone,
+        updatedAt: new Date().toISOString(),
+      },
+    });
+
+    // Automated Delivery Trigger: When fulfillment reaches active dispatch point
+    if (['CONFIRMED', 'PARTNER_ACCEPTED', 'PREPARING', 'PACKED', 'DISPATCHED'].includes(status)) {
+      deliveryService.bookDeliveryForFulfillment(orderId, fulfillmentId).catch((e) => {
+        console.warn(`[Automated Delivery] Booking trigger deferred for fulfillment ${fulfillmentId}:`, e.message);
+      });
+    }
 
     return reply.send({
       orderId,
